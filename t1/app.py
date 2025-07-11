@@ -76,6 +76,7 @@ def get_filters(matches):
 @app.route('/')
 def index():
     matches = fetch_matches()
+    print(f"Nombre de matchs récupérés: {len(matches)}")
     sports, ligues, statuts = get_filters(matches)
     sport = request.args.get('sport', '')
     ligue = request.args.get('ligue', '')
@@ -97,6 +98,12 @@ def index():
     end = start + per_page
     matchs_page = filtered[start:end]
 
+    message = None
+    if not matches:
+        message = "Aucun match n'a été récupéré depuis l'API. Vérifiez la connexion ou l'API."
+    elif not matchs_page:
+        message = "Aucun match à afficher avec les filtres sélectionnés."
+
     return render_template('index.html',
         matchs=matchs_page,
         sports=sports,
@@ -107,7 +114,8 @@ def index():
         selected_statut=statut,
         page=page,
         pages=pages,
-        total=total
+        total=total,
+        message=message
     )
 
 @app.route('/match/<int:match_id>')
