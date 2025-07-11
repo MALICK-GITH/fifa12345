@@ -222,7 +222,7 @@ def traduire_pari(nom, valeur=None):
         return (nom_str.capitalize(), choix)
 
 def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
-    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping explicite et noms d'équipes."""
+    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping explicite, noms d'équipes et distinction Over/Under."""
     # 1X2
     if groupe == 1 and type_pari in [1, 2, 3]:
         return {1: f"Victoire {team1}", 2: f"Victoire {team2}", 3: "Match nul"}.get(type_pari, "1X2")
@@ -240,6 +240,11 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
     if groupe in [8, 17, 62]:
         if param is not None:
             seuil = abs(float(param))
+            if type_pari in [9]:  # T=9 = Over (Plus de)
+                return f"Plus de {seuil} buts"
+            elif type_pari in [10]:  # T=10 = Under (Moins de)
+                return f"Moins de {seuil} buts"
+            # fallback si on ne sait pas
             if float(param) > 0:
                 return f"Plus de {seuil} buts"
             else:
