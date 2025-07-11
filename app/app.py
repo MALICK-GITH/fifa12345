@@ -438,7 +438,6 @@ if __name__ == "__main__":
                 localStorage.setItem('dark-mode', isDark);
             });
         });
-    </script>
-    <button id="darkModeBtn" type="button" style="position:fixed;top:20px;right:20px;z-index:1000;padding:10px 18px;font-size:16px;border-radius:6px;border:none;background:#27ae60;color:#fff;cursor:pointer;font-weight:bold;box-shadow:0 2px 6px #ccc;" aria-label="Activer/désactiver le mode sombre">🌙 Mode sombre</button>
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    # ...existing code...
+port = int(os.environ.get("PORT", 5000))
+app.run(host="0.0.0.0", port=port)
