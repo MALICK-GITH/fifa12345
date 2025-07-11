@@ -221,6 +221,26 @@ def traduire_pari(nom, valeur=None):
     else:
         return (nom_str.capitalize(), choix)
 
+def traduire_pari_type_groupe(type_pari, groupe, param):
+    """Traduit le type de pari selon T, G et P (structure 1xbet)."""
+    # 1X2
+    if groupe == 1 and type_pari in [1, 2, 3]:
+        return {1: "Victoire équipe 1", 2: "Victoire équipe 2", 3: "Match nul"}.get(type_pari, "1X2")
+    # Handicap
+    if groupe == 2:
+        return "Handicap"
+    # Over/Under
+    if groupe == 2 and param is not None:
+        if float(param) > 0:
+            return "Plus de"
+        else:
+            return "Moins de"
+    # Double chance
+    if groupe == 3:
+        return "Double chance"
+    # Autres cas à enrichir si besoin
+    return f"Pari G{groupe} T{type_pari}"
+
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
     try:
@@ -288,28 +308,31 @@ def match_details(match_id):
         # 1. E (marchés principaux et alternatifs)
         for o in match.get("E", []):
             if o.get("G") != 1 and o.get("C") is not None:
-                nom = o.get("N") or o.get("P") or "?"
-                valeur = o.get("V") or o.get("N2") or ""
+                type_pari = o.get("T")
+                groupe = o.get("G")
+                param = o.get("P") if "P" in o else None
+                nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param)
+                valeur = param if param is not None else ""
                 cote = o.get("C")
-                nom_traduit, choix = traduire_pari(nom, valeur)
                 paris_alternatifs.append({
                     "nom": nom_traduit,
-                    "valeur": choix,
+                    "valeur": valeur,
                     "cote": cote
                 })
         # 2. AE (marchés alternatifs étendus)
         for ae in match.get("AE", []):
             if ae.get("G") != 1:
-                nom_ae = ae.get("N") or ae.get("P") or "?"
                 for o in ae.get("ME", []):
                     if o.get("C") is not None:
-                        nom = o.get("N") or nom_ae or "?"
-                        valeur = o.get("V") or o.get("N2") or ""
+                        type_pari = o.get("T")
+                        groupe = o.get("G")
+                        param = o.get("P") if "P" in o else None
+                        nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param)
+                        valeur = param if param is not None else ""
                         cote = o.get("C")
-                        nom_traduit, choix = traduire_pari(nom, valeur)
                         paris_alternatifs.append({
                             "nom": nom_traduit,
-                            "valeur": choix,
+                            "valeur": valeur,
                             "cote": cote
                         })
         # Sélection de la prédiction alternative la plus probable (cote la plus basse)
@@ -353,7 +376,7 @@ def match_details(match_id):
                 </table>
                 <h3>Tableau des paris alternatifs</h3>
                 <table class="alt-table">
-                    <tr><th>Pari alternatif</th><th>Valeur/Choix</th><th>Cote</th></tr>
+                    <tr><th>Type de pari</th><th>Valeur</th><th>Cote</th></tr>
                     {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td></tr>' for p in paris_alternatifs)}
                 </table>
                 <canvas id="statsChart" height="200"></canvas>
