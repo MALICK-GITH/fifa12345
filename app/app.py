@@ -415,29 +415,5 @@ TEMPLATE = """<!DOCTYPE html>
 </body></html>"""
 
 if __name__ == "__main__":
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            var forms = document.querySelectorAll('form');
-            forms.forEach(function(form) {
-                form.addEventListener('submit', function() {
-                    document.getElementById('loader').style.display = 'flex';
-                });
-            });
-            // Dark mode toggle
-            var darkBtn = document.getElementById('darkModeBtn');
-            var body = document.body;
-            // Load preference
-            if (localStorage.getItem('dark-mode') === 'true') {
-                body.classList.add('dark-mode');
-                darkBtn.textContent = '☀️ Mode clair';
-            }
-            darkBtn.addEventListener('click', function() {
-                body.classList.toggle('dark-mode');
-                var isDark = body.classList.contains('dark-mode');
-                darkBtn.textContent = isDark ? '☀️ Mode clair' : '🌙 Mode sombre';
-                localStorage.setItem('dark-mode', isDark);
-            });
-        });
-    # ...existing code...
-port = int(os.environ.get("PORT", 5000))
-app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
