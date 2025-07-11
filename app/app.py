@@ -387,6 +387,8 @@ def match_details(match_id):
                 .stats-table th, .stats-table td, .alt-table th, .alt-table td {{ border: 1px solid #ccc; padding: 8px; text-align: center; }}
                 .back-btn {{ margin-bottom: 20px; display: inline-block; }}
                 .highlight-pred {{ background: #eaf6fb; color: #2980b9; font-weight: bold; padding: 10px; border-radius: 6px; margin-bottom: 15px; }}
+                .contact-box {{ background: #f0f8ff; border: 1.5px solid #2980b9; border-radius: 8px; margin-top: 30px; padding: 18px; text-align: center; font-size: 17px; }}
+                .contact-box a {{ color: #1565c0; font-weight: bold; text-decoration: none; }}
             </style>
         </head><body>
             <div class="container">
@@ -407,10 +409,17 @@ def match_details(match_id):
                 </table>
                 <h3>Tableau des paris alternatifs</h3>
                 <table class="alt-table">
-                    <tr><th>Type de pari</th><th>Valeur</th><th>Cote</th></tr>
-                    {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td></tr>' for p in paris_alternatifs)}
+                    <tr><th>Type de pari</th><th>Valeur</th><th>Cote</th><th>Prédiction</th></tr>
+                    {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td><td>{generer_prediction_lisible(p["nom"], p["valeur"], team1, team2)}</td></tr>' for p in paris_alternatifs)}
                 </table>
                 <canvas id="statsChart" height="200"></canvas>
+                <div class="contact-box">
+                    <b>Contact & Services :</b><br>
+                    📬 Inbox Telegram : <a href="https://t.me/Roidesombres225" target="_blank">@Roidesombres225</a><br>
+                    📢 Canal Telegram : <a href="https://t.me/SOLITAIREHACK" target="_blank">SOLITAIREHACK</a><br>
+                    🎨 Je suis aussi concepteur graphique et créateur de logiciels.<br>
+                    <span style="color:#2980b9;">Vous avez un projet en tête ? Contactez-moi, je suis là pour vous !</span>
+                </div>
             </div>
             <script>
                 const labels = { [repr(s['nom']) for s in stats] };
@@ -482,6 +491,9 @@ TEMPLATE = """<!DOCTYPE html>
         @keyframes spin { 100% { transform: rotate(360deg); } }
         /* Focus visible for accessibility */
         a:focus, button:focus, select:focus { outline: 2px solid #27ae60; }
+        .contact-box { background: #ff1744; border: 4px solid #ff1744; border-radius: 16px; margin: 40px auto 0 auto; padding: 28px; text-align: center; font-size: 22px; font-weight: bold; color: #fff; max-width: 650px; box-shadow: 0 0 24px 8px #ff1744, 0 0 60px 10px #fff3; text-shadow: 0 0 8px #fff, 0 0 16px #ff1744; letter-spacing: 1px; }
+        .contact-box a { color: #fff; font-weight: bold; text-decoration: underline; font-size: 26px; text-shadow: 0 0 8px #fff, 0 0 16px #ff1744; }
+        .contact-box .icon { font-size: 32px; vertical-align: middle; margin-right: 10px; filter: drop-shadow(0 0 6px #fff); }
     </style>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -552,7 +564,33 @@ TEMPLATE = """<!DOCTYPE html>
         </tr>
         {% endfor %}
     </table>
+    <div class="contact-box">
+        <span class="icon">📬</span> Inbox Telegram : <a href="https://t.me/Roidesombres225" target="_blank">@Roidesombres225</a><br>
+        <span class="icon">📢</span> Canal Telegram : <a href="https://t.me/SOLITAIREHACK" target="_blank">SOLITAIREHACK</a><br>
+        <span class="icon">🎨</span> Je suis aussi concepteur graphique et créateur de logiciels.<br>
+        <span style="color:#d84315; font-size:22px; font-weight:bold;">Vous avez un projet en tête ? Contactez-moi, je suis là pour vous !</span>
+    </div>
 </body></html>"""
+
+def generer_prediction_lisible(nom, valeur, team1, team2):
+    """Génère une phrase prédictive claire pour chaque pari, en précisant l'équipe si besoin."""
+    if nom.startswith("Victoire "):
+        return f"{nom}"
+    if nom.startswith("Handicap "):
+        return f"{nom}"
+    if nom.startswith("Plus de") or nom.startswith("Moins de"):
+        return f"{nom}"
+    if nom.startswith("Score exact"):
+        return f"{nom}"
+    if nom.startswith("Double chance"):
+        return f"{nom}"
+    if nom.startswith("Nombre de buts"):
+        return f"{nom}"
+    if team1 and team1 in nom:
+        return f"{nom} ({team1})"
+    if team2 and team2 in nom:
+        return f"{nom} ({team2})"
+    return nom
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
