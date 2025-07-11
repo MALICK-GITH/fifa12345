@@ -179,6 +179,39 @@ def detect_sport(league_name):
     else:
         return "Football"
 
+def traduire_pari(nom, valeur=None):
+    """Traduit le nom d'un pari alternatif et sa valeur en français."""
+    nom = nom.lower() if nom else ""
+    if "total" in nom:
+        if "over" in nom or (valeur and ("over" in valeur.lower() or "+" in valeur)):
+            return f"Plus de {valeur.split()[-1] if valeur else ''} buts"
+        elif "under" in nom or (valeur and ("under" in valeur.lower() or "-" in valeur)):
+            return f"Moins de {valeur.split()[-1] if valeur else ''} buts"
+        else:
+            return f"Total buts {valeur if valeur else ''}"
+    elif "both teams to score" in nom:
+        return "Les deux équipes marquent"
+    elif "handicap" in nom:
+        return f"Handicap {valeur if valeur else ''}"
+    elif "double chance" in nom:
+        return "Double chance"
+    elif "draw no bet" in nom:
+        return "Remboursé si match nul"
+    elif "odd/even" in nom or "odd" in nom or "even" in nom:
+        return "Nombre de buts pair/impair"
+    elif "clean sheet" in nom:
+        return "Clean sheet (équipe ne prend pas de but)"
+    elif "correct score" in nom:
+        return "Score exact"
+    elif "win to nil" in nom:
+        return "Gagne sans encaisser de but"
+    elif "first goal" in nom:
+        return "Première équipe à marquer"
+    elif "to win" in nom:
+        return "Pour gagner"
+    else:
+        return nom.capitalize()
+
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
     try:
@@ -216,7 +249,7 @@ def match_details(match_id):
                 stats.append({"nom": nom, "s1": s1, "s2": s2})
         # Explication prédiction (simple)
         explication = "La prédiction est basée sur les cotes et les statistiques principales (tirs, possession, etc.)."  # Peut être enrichi
-        # Prédiction
+        # Prédiction 1X2
         odds_data = []
         for o in match.get("E", []):
             if o.get("G") == 1 and o.get("T") in [1, 2, 3] and o.get("C") is not None:
@@ -241,7 +274,41 @@ def match_details(match_id):
                 "2": f"{team2} gagne",
                 "X": "Match nul"
             }.get(best["type"], "–")
-        # HTML avec graphiques Chart.js CDN
+        # --- Paris alternatifs ---
+        paris_alternatifs = []
+        # 1. E (marchés principaux et alternatifs)
+        for o in match.get("E", []):
+            if o.get("G") != 1 and o.get("C") is not None:
+                nom = o.get("N") or o.get("P") or "?"
+                valeur = o.get("V") or o.get("N2") or ""
+                cote = o.get("C")
+                nom_traduit = traduire_pari(nom, valeur)
+                paris_alternatifs.append({
+                    "nom": nom_traduit,
+                    "valeur": valeur,
+                    "cote": cote
+                })
+        # 2. AE (marchés alternatifs étendus)
+        for ae in match.get("AE", []):
+            if ae.get("G") != 1:
+                nom_ae = ae.get("N") or ae.get("P") or "?"
+                for o in ae.get("ME", []):
+                    if o.get("C") is not None:
+                        nom = o.get("N") or nom_ae or "?"
+                        valeur = o.get("V") or o.get("N2") or ""
+                        cote = o.get("C")
+                        nom_traduit = traduire_pari(nom, valeur)
+                        paris_alternatifs.append({
+                            "nom": nom_traduit,
+                            "valeur": valeur,
+                            "cote": cote
+                        })
+        # Sélection de la prédiction alternative la plus probable (cote la plus basse)
+        prediction_alt = None
+        if paris_alternatifs:
+            meilleur_pari = min(paris_alternatifs, key=lambda x: x["cote"])
+            prediction_alt = f"{meilleur_pari['nom']} ({meilleur_pari['valeur']}) à {meilleur_pari['cote']}"
+        # HTML avec tableau des paris alternatifs
         return f'''
         <!DOCTYPE html>
         <html><head>
@@ -251,11 +318,12 @@ def match_details(match_id):
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
             <style>
                 body {{ font-family: Arial; padding: 20px; background: #f4f4f4; }}
-                .container {{ max-width: 700px; margin: auto; background: white; border-radius: 10px; box-shadow: 0 2px 8px #ccc; padding: 20px; }}
+                .container {{ max-width: 800px; margin: auto; background: white; border-radius: 10px; box-shadow: 0 2px 8px #ccc; padding: 20px; }}
                 h2 {{ text-align: center; }}
-                .stats-table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-                .stats-table th, .stats-table td {{ border: 1px solid #ccc; padding: 8px; text-align: center; }}
+                .stats-table, .alt-table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                .stats-table th, .stats-table td, .alt-table th, .alt-table td {{ border: 1px solid #ccc; padding: 8px; text-align: center; }}
                 .back-btn {{ margin-bottom: 20px; display: inline-block; }}
+                .highlight-pred {{ background: #eaf6fb; color: #2980b9; font-weight: bold; padding: 10px; border-radius: 6px; margin-bottom: 15px; }}
             </style>
         </head><body>
             <div class="container">
@@ -263,12 +331,21 @@ def match_details(match_id):
                 <h2>{team1} vs {team2}</h2>
                 <p><b>Ligue :</b> {league} | <b>Sport :</b> {sport}</p>
                 <p><b>Score :</b> {score1} - {score2}</p>
-                <p><b>Prédiction du bot :</b> {prediction}</p>
+                <p><b>Prédiction 1X2 du bot :</b> {prediction}</p>
                 <p><b>Explication :</b> {explication}</p>
+                <div class="highlight-pred">
+                    <b>Prédiction alternative du bot :</b><br>
+                    {prediction_alt if prediction_alt else 'Aucune prédiction alternative disponible'}
+                </div>
                 <h3>Statistiques principales</h3>
                 <table class="stats-table">
                     <tr><th>Statistique</th><th>{team1}</th><th>{team2}</th></tr>
                     {''.join(f'<tr><td>{s["nom"]}</td><td>{s["s1"]}</td><td>{s["s2"]}</td></tr>' for s in stats)}
+                </table>
+                <h3>Tableau des paris alternatifs</h3>
+                <table class="alt-table">
+                    <tr><th>Pari alternatif</th><th>Valeur/Choix</th><th>Cote</th></tr>
+                    {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td></tr>' for p in paris_alternatifs)}
                 </table>
                 <canvas id="statsChart" height="200"></canvas>
             </div>
