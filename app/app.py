@@ -182,17 +182,18 @@ def detect_sport(league_name):
 def traduire_pari(nom, valeur=None):
     """Traduit le nom d'un pari alternatif et sa valeur en français."""
     nom = nom.lower() if nom else ""
+    valeur_str = str(valeur) if valeur is not None else ""
     if "total" in nom:
-        if "over" in nom or (valeur and ("over" in valeur.lower() or "+" in valeur)):
-            return f"Plus de {valeur.split()[-1] if valeur else ''} buts"
-        elif "under" in nom or (valeur and ("under" in valeur.lower() or "-" in valeur)):
-            return f"Moins de {valeur.split()[-1] if valeur else ''} buts"
+        if "over" in nom or ("over" in valeur_str.lower() or "+" in valeur_str):
+            return f"Plus de {valeur_str.split()[-1] if valeur_str else ''} buts"
+        elif "under" in nom or ("under" in valeur_str.lower() or "-" in valeur_str):
+            return f"Moins de {valeur_str.split()[-1] if valeur_str else ''} buts"
         else:
-            return f"Total buts {valeur if valeur else ''}"
+            return f"Total buts {valeur_str if valeur_str else ''}"
     elif "both teams to score" in nom:
         return "Les deux équipes marquent"
     elif "handicap" in nom:
-        return f"Handicap {valeur if valeur else ''}"
+        return f"Handicap {valeur_str if valeur_str else ''}"
     elif "double chance" in nom:
         return "Double chance"
     elif "draw no bet" in nom:
