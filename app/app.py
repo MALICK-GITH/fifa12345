@@ -221,15 +221,20 @@ def traduire_pari(nom, valeur=None):
     else:
         return (nom_str.capitalize(), choix)
 
-def traduire_pari_type_groupe(type_pari, groupe, param):
-    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping explicite."""
+def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
+    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping explicite et noms d'équipes."""
     # 1X2
     if groupe == 1 and type_pari in [1, 2, 3]:
-        return {1: "Victoire équipe 1", 2: "Victoire équipe 2", 3: "Match nul"}.get(type_pari, "1X2")
+        return {1: f"Victoire {team1}", 2: f"Victoire {team2}", 3: "Match nul"}.get(type_pari, "1X2")
     # Handicap
     if groupe == 2:
         if param is not None:
-            return f"Handicap {param}"
+            if type_pari == 1 and team1:
+                return f"Handicap {team1} {param}"
+            elif type_pari == 2 and team2:
+                return f"Handicap {team2} {param}"
+            else:
+                return f"Handicap {param}"
         return "Handicap"
     # Over/Under (souvent G8 ou G17 ou G62)
     if groupe in [8, 17, 62]:
@@ -239,12 +244,20 @@ def traduire_pari_type_groupe(type_pari, groupe, param):
                 return f"Plus de {seuil} buts"
             else:
                 return f"Moins de {seuil} buts"
-        return "Over/Under"
+        return "Plus/Moins de buts"
     # Score exact
     if groupe == 15:
+        if param is not None:
+            return f"Score exact {param}"
         return "Score exact"
     # Double chance
     if groupe == 3:
+        if type_pari == 1 and team1 and team2:
+            return f"Double chance {team1} ou {team2}"
+        elif type_pari == 2 and team1:
+            return f"Double chance {team1} ou Nul"
+        elif type_pari == 3 and team2:
+            return f"Double chance {team2} ou Nul"
         return "Double chance"
     # Nombre de buts
     if groupe in [19, 180, 181]:
@@ -322,7 +335,7 @@ def match_details(match_id):
                 type_pari = o.get("T")
                 groupe = o.get("G")
                 param = o.get("P") if "P" in o else None
-                nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param)
+                nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2)
                 valeur = param if param is not None else ""
                 cote = o.get("C")
                 paris_alternatifs.append({
@@ -338,7 +351,7 @@ def match_details(match_id):
                         type_pari = o.get("T")
                         groupe = o.get("G")
                         param = o.get("P") if "P" in o else None
-                        nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param)
+                        nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2)
                         valeur = param if param is not None else ""
                         cote = o.get("C")
                         paris_alternatifs.append({
