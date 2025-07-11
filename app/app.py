@@ -181,37 +181,38 @@ def detect_sport(league_name):
 
 def traduire_pari(nom, valeur=None):
     """Traduit le nom d'un pari alternatif et sa valeur en français."""
-    nom = nom.lower() if nom else ""
+    nom_str = str(nom).lower() if nom else ""
     valeur_str = str(valeur) if valeur is not None else ""
-    if "total" in nom:
-        if "over" in nom or ("over" in valeur_str.lower() or "+" in valeur_str):
+    valeur_str_lower = valeur_str.lower()
+    if "total" in nom_str:
+        if "over" in nom_str or "over" in valeur_str_lower or "+" in valeur_str:
             return f"Plus de {valeur_str.split()[-1] if valeur_str else ''} buts"
-        elif "under" in nom or ("under" in valeur_str.lower() or "-" in valeur_str):
+        elif "under" in nom_str or "under" in valeur_str_lower or "-" in valeur_str:
             return f"Moins de {valeur_str.split()[-1] if valeur_str else ''} buts"
         else:
             return f"Total buts {valeur_str if valeur_str else ''}"
-    elif "both teams to score" in nom:
+    elif "both teams to score" in nom_str:
         return "Les deux équipes marquent"
-    elif "handicap" in nom:
+    elif "handicap" in nom_str:
         return f"Handicap {valeur_str if valeur_str else ''}"
-    elif "double chance" in nom:
+    elif "double chance" in nom_str:
         return "Double chance"
-    elif "draw no bet" in nom:
+    elif "draw no bet" in nom_str:
         return "Remboursé si match nul"
-    elif "odd/even" in nom or "odd" in nom or "even" in nom:
+    elif "odd/even" in nom_str or "odd" in nom_str or "even" in nom_str:
         return "Nombre de buts pair/impair"
-    elif "clean sheet" in nom:
+    elif "clean sheet" in nom_str:
         return "Clean sheet (équipe ne prend pas de but)"
-    elif "correct score" in nom:
+    elif "correct score" in nom_str:
         return "Score exact"
-    elif "win to nil" in nom:
+    elif "win to nil" in nom_str:
         return "Gagne sans encaisser de but"
-    elif "first goal" in nom:
+    elif "first goal" in nom_str:
         return "Première équipe à marquer"
-    elif "to win" in nom:
+    elif "to win" in nom_str:
         return "Pour gagner"
     else:
-        return nom.capitalize()
+        return nom_str.capitalize()
 
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
