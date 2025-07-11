@@ -297,26 +297,31 @@ TEMPLATE = """<!DOCTYPE html>
 <html><head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Matchs en direct</title>
+    <title>Live Football & Sports | Prédictions & Stats</title>
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/197/197604.png">
     <style>
-        body { font-family: Arial; padding: 20px; background: #f4f4f4; }
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f4f4f4; }
         h2 { text-align: center; }
         form { text-align: center; margin-bottom: 20px; }
-        select { padding: 8px; margin: 0 10px; font-size: 14px; }
+        label { font-weight: bold; margin-right: 10px; }
+        select { padding: 12px; margin: 0 10px; font-size: 16px; border-radius: 6px; border: 1px solid #2c3e50; background: #fff; color: #2c3e50; }
+        select:focus { outline: 2px solid #2980b9; }
         table { border-collapse: collapse; margin: auto; width: 98%; background: white; }
-        th, td { padding: 10px; border: 1px solid #ccc; text-align: center; }
-        th { background: #2c3e50; color: white; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
+        th, td { padding: 14px; border: 1.5px solid #2c3e50; text-align: center; font-size: 16px; }
+        th { background: #1a252f; color: #fff; font-size: 18px; }
+        tr:nth-child(even) { background-color: #eaf6fb; }
+        tr:nth-child(odd) { background-color: #f9f9f9; }
         .pagination { text-align: center; margin: 20px 0; }
-        .pagination button { padding: 8px 16px; margin: 0 4px; font-size: 16px; border: none; background: #2c3e50; color: white; border-radius: 4px; cursor: pointer; }
-        .pagination button:disabled { background: #ccc; cursor: not-allowed; }
+        .pagination button { padding: 14px 24px; margin: 0 6px; font-size: 18px; border: none; background: #2980b9; color: #fff; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        .pagination button:disabled { background: #b2bec3; color: #636e72; cursor: not-allowed; }
+        .pagination button:focus { outline: 2px solid #27ae60; }
         /* Responsive */
         @media (max-width: 800px) {
             table, thead, tbody, th, td, tr { display: block; }
             th { position: absolute; left: -9999px; top: -9999px; }
             tr { margin-bottom: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 6px #ccc; }
-            td { border: none; border-bottom: 1px solid #eee; position: relative; padding-left: 50%; min-height: 40px; }
-            td:before { position: absolute; top: 10px; left: 10px; width: 45%; white-space: nowrap; font-weight: bold; }
+            td { border: none; border-bottom: 1px solid #eee; position: relative; padding-left: 50%; min-height: 40px; font-size: 16px; }
+            td:before { position: absolute; top: 10px; left: 10px; width: 45%; white-space: nowrap; font-weight: bold; color: #2980b9; }
             td:nth-of-type(1):before { content: 'Équipe 1'; }
             td:nth-of-type(2):before { content: 'Score 1'; }
             td:nth-of-type(3):before { content: 'Score 2'; }
@@ -329,11 +334,14 @@ TEMPLATE = """<!DOCTYPE html>
             td:nth-of-type(10):before { content: 'Humidité'; }
             td:nth-of-type(11):before { content: 'Cotes'; }
             td:nth-of-type(12):before { content: 'Prédiction'; }
+            td:nth-of-type(13):before { content: 'Détails'; }
         }
         /* Loader */
         #loader { display: none; position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.7); z-index: 9999; justify-content: center; align-items: center; }
-        #loader .spinner { border: 8px solid #f3f3f3; border-top: 8px solid #2c3e50; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; }
+        #loader .spinner { border: 8px solid #f3f3f3; border-top: 8px solid #2980b9; border-radius: 50%; width: 60px; height: 60px; animation: spin 1s linear infinite; }
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        /* Focus visible for accessibility */
+        a:focus, button:focus, select:focus { outline: 2px solid #27ae60; }
     </style>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -346,49 +354,46 @@ TEMPLATE = """<!DOCTYPE html>
         });
     </script>
 </head><body>
-    <div id="loader"><div class="spinner"></div></div>
+    <div id="loader" role="status" aria-live="polite"><div class="spinner" aria-label="Chargement"></div></div>
     <h2>📊 Matchs en direct — {{ selected_sport }} / {{ selected_league }} / {{ selected_status }}</h2>
 
-    <form method="get">
-        <label>Sport :
-            <select name="sport" onchange="this.form.submit()">
-                <option value="">Tous</option>
-                {% for s in sports %}
-                    <option value="{{s}}" {% if s == selected_sport %}selected{% endif %}>{{s}}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>Ligue :
-            <select name="league" onchange="this.form.submit()">
-                <option value="">Toutes</option>
-                {% for l in leagues %}
-                    <option value="{{l}}" {% if l == selected_league %}selected{% endif %}>{{l}}</option>
-                {% endfor %}
-            </select>
-        </label>
-        <label>Statut :
-            <select name="status" onchange="this.form.submit()">
-                <option value="">Tous</option>
-                <option value="live" {% if selected_status == "live" %}selected{% endif %}>En direct</option>
-                <option value="upcoming" {% if selected_status == "upcoming" %}selected{% endif %}>À venir</option>
-                <option value="finished" {% if selected_status == "finished" %}selected{% endif %}>Terminé</option>
-            </select>
-        </label>
+    <form method="get" aria-label="Filtres de matchs">
+        <label for="sport-select">Sport :</label>
+        <select id="sport-select" name="sport" onchange="this.form.submit()" aria-label="Filtrer par sport">
+            <option value="">Tous</option>
+            {% for s in sports %}
+                <option value="{{s}}" {% if s == selected_sport %}selected{% endif %}>{{s}}</option>
+            {% endfor %}
+        </select>
+        <label for="league-select">Ligue :</label>
+        <select id="league-select" name="league" onchange="this.form.submit()" aria-label="Filtrer par ligue">
+            <option value="">Toutes</option>
+            {% for l in leagues %}
+                <option value="{{l}}" {% if l == selected_league %}selected{% endif %}>{{l}}</option>
+            {% endfor %}
+        </select>
+        <label for="status-select">Statut :</label>
+        <select id="status-select" name="status" onchange="this.form.submit()" aria-label="Filtrer par statut">
+            <option value="">Tous</option>
+            <option value="live" {% if selected_status == "live" %}selected{% endif %}>En direct</option>
+            <option value="upcoming" {% if selected_status == "upcoming" %}selected{% endif %}>À venir</option>
+            <option value="finished" {% if selected_status == "finished" %}selected{% endif %}>Terminé</option>
+        </select>
     </form>
 
     <div class="pagination">
-        <form method="get" style="display:inline;">
+        <form method="get" style="display:inline;" aria-label="Page précédente">
             <input type="hidden" name="sport" value="{{ selected_sport if selected_sport != 'Tous' else '' }}">
             <input type="hidden" name="league" value="{{ selected_league if selected_league != 'Toutes' else '' }}">
             <input type="hidden" name="status" value="{{ selected_status if selected_status != 'Tous' else '' }}">
-            <button type="submit" name="page" value="{{ page-1 }}" {% if page <= 1 %}disabled{% endif %}>Page précédente</button>
+            <button type="submit" name="page" value="{{ page-1 }}" {% if page <= 1 %}disabled{% endif %} aria-label="Page précédente">Page précédente</button>
         </form>
-        <span>Page {{ page }} / {{ total_pages }}</span>
-        <form method="get" style="display:inline;">
+        <span aria-live="polite">Page {{ page }} / {{ total_pages }}</span>
+        <form method="get" style="display:inline;" aria-label="Page suivante">
             <input type="hidden" name="sport" value="{{ selected_sport if selected_sport != 'Tous' else '' }}">
             <input type="hidden" name="league" value="{{ selected_league if selected_league != 'Toutes' else '' }}">
             <input type="hidden" name="status" value="{{ selected_status if selected_status != 'Tous' else '' }}">
-            <button type="submit" name="page" value="{{ page+1 }}" {% if page >= total_pages %}disabled{% endif %}>Page suivante</button>
+            <button type="submit" name="page" value="{{ page+1 }}" {% if page >= total_pages %}disabled{% endif %} aria-label="Page suivante">Page suivante</button>
         </form>
     </div>
 
@@ -410,5 +415,30 @@ TEMPLATE = """<!DOCTYPE html>
 </body></html>"""
 
 if __name__ == "__main__":
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            var forms = document.querySelectorAll('form');
+            forms.forEach(function(form) {
+                form.addEventListener('submit', function() {
+                    document.getElementById('loader').style.display = 'flex';
+                });
+            });
+            // Dark mode toggle
+            var darkBtn = document.getElementById('darkModeBtn');
+            var body = document.body;
+            // Load preference
+            if (localStorage.getItem('dark-mode') === 'true') {
+                body.classList.add('dark-mode');
+                darkBtn.textContent = '☀️ Mode clair';
+            }
+            darkBtn.addEventListener('click', function() {
+                body.classList.toggle('dark-mode');
+                var isDark = body.classList.contains('dark-mode');
+                darkBtn.textContent = isDark ? '☀️ Mode clair' : '🌙 Mode sombre';
+                localStorage.setItem('dark-mode', isDark);
+            });
+        });
+    </script>
+    <button id="darkModeBtn" type="button" style="position:fixed;top:20px;right:20px;z-index:1000;padding:10px 18px;font-size:16px;border-radius:6px;border:none;background:#27ae60;color:#fff;cursor:pointer;font-weight:bold;box-shadow:0 2px 6px #ccc;" aria-label="Activer/désactiver le mode sombre">🌙 Mode sombre</button>
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
