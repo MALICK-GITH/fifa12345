@@ -184,35 +184,42 @@ def traduire_pari(nom, valeur=None):
     nom_str = str(nom).lower() if nom else ""
     valeur_str = str(valeur) if valeur is not None else ""
     valeur_str_lower = valeur_str.lower()
+    # Cas Oui/Non
+    if valeur_str_lower in ["yes", "oui"]:
+        choix = "Oui"
+    elif valeur_str_lower in ["no", "non"]:
+        choix = "Non"
+    else:
+        choix = valeur_str
     if "total" in nom_str:
         if "over" in nom_str or "over" in valeur_str_lower or "+" in valeur_str:
-            return f"Plus de {valeur_str.split()[-1] if valeur_str else ''} buts"
+            return ("Plus de buts", choix)
         elif "under" in nom_str or "under" in valeur_str_lower or "-" in valeur_str:
-            return f"Moins de {valeur_str.split()[-1] if valeur_str else ''} buts"
+            return ("Moins de buts", choix)
         else:
-            return f"Total buts {valeur_str if valeur_str else ''}"
+            return ("Total buts", choix)
     elif "both teams to score" in nom_str:
-        return "Les deux équipes marquent"
+        return ("Les deux équipes marquent", choix)
     elif "handicap" in nom_str:
-        return f"Handicap {valeur_str if valeur_str else ''}"
+        return ("Handicap", choix)
     elif "double chance" in nom_str:
-        return "Double chance"
+        return ("Double chance", choix)
     elif "draw no bet" in nom_str:
-        return "Remboursé si match nul"
+        return ("Remboursé si match nul", choix)
     elif "odd/even" in nom_str or "odd" in nom_str or "even" in nom_str:
-        return "Nombre de buts pair/impair"
+        return ("Nombre de buts pair/impair", choix)
     elif "clean sheet" in nom_str:
-        return "Clean sheet (équipe ne prend pas de but)"
+        return ("Clean sheet (équipe ne prend pas de but)", choix)
     elif "correct score" in nom_str:
-        return "Score exact"
+        return ("Score exact", choix)
     elif "win to nil" in nom_str:
-        return "Gagne sans encaisser de but"
+        return ("Gagne sans encaisser de but", choix)
     elif "first goal" in nom_str:
-        return "Première équipe à marquer"
+        return ("Première équipe à marquer", choix)
     elif "to win" in nom_str:
-        return "Pour gagner"
+        return ("Pour gagner", choix)
     else:
-        return nom_str.capitalize()
+        return (nom_str.capitalize(), choix)
 
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
@@ -284,10 +291,10 @@ def match_details(match_id):
                 nom = o.get("N") or o.get("P") or "?"
                 valeur = o.get("V") or o.get("N2") or ""
                 cote = o.get("C")
-                nom_traduit = traduire_pari(nom, valeur)
+                nom_traduit, choix = traduire_pari(nom, valeur)
                 paris_alternatifs.append({
                     "nom": nom_traduit,
-                    "valeur": valeur,
+                    "valeur": choix,
                     "cote": cote
                 })
         # 2. AE (marchés alternatifs étendus)
@@ -299,10 +306,10 @@ def match_details(match_id):
                         nom = o.get("N") or nom_ae or "?"
                         valeur = o.get("V") or o.get("N2") or ""
                         cote = o.get("C")
-                        nom_traduit = traduire_pari(nom, valeur)
+                        nom_traduit, choix = traduire_pari(nom, valeur)
                         paris_alternatifs.append({
                             "nom": nom_traduit,
-                            "valeur": valeur,
+                            "valeur": choix,
                             "cote": cote
                         })
         # Sélection de la prédiction alternative la plus probable (cote la plus basse)
