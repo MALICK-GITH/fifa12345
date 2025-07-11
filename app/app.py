@@ -222,24 +222,35 @@ def traduire_pari(nom, valeur=None):
         return (nom_str.capitalize(), choix)
 
 def traduire_pari_type_groupe(type_pari, groupe, param):
-    """Traduit le type de pari selon T, G et P (structure 1xbet)."""
+    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping explicite."""
     # 1X2
     if groupe == 1 and type_pari in [1, 2, 3]:
         return {1: "Victoire équipe 1", 2: "Victoire équipe 2", 3: "Match nul"}.get(type_pari, "1X2")
     # Handicap
     if groupe == 2:
+        if param is not None:
+            return f"Handicap {param}"
         return "Handicap"
-    # Over/Under
-    if groupe == 2 and param is not None:
-        if float(param) > 0:
-            return "Plus de"
-        else:
-            return "Moins de"
+    # Over/Under (souvent G8 ou G17 ou G62)
+    if groupe in [8, 17, 62]:
+        if param is not None:
+            seuil = abs(float(param))
+            if float(param) > 0:
+                return f"Plus de {seuil} buts"
+            else:
+                return f"Moins de {seuil} buts"
+        return "Over/Under"
+    # Score exact
+    if groupe == 15:
+        return "Score exact"
     # Double chance
     if groupe == 3:
         return "Double chance"
-    # Autres cas à enrichir si besoin
-    return f"Pari G{groupe} T{type_pari}"
+    # Nombre de buts
+    if groupe in [19, 180, 181]:
+        return "Nombre de buts"
+    # Ajoute d'autres mappings selon tes observations
+    return f"Pari spécial (G{groupe} T{type_pari})"
 
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
