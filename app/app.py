@@ -346,6 +346,8 @@ def match_details(match_id):
                             "valeur": valeur,
                             "cote": cote
                         })
+        # Filtrer les paris alternatifs selon la cote demandée
+        paris_alternatifs = [p for p in paris_alternatifs if 1.499 <= float(p["cote"]) <= 3]
         # Sélection de la prédiction alternative la plus probable (cote la plus basse)
         prediction_alt = None
         if paris_alternatifs:
