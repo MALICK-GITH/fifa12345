@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Matchs de football en direct</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Matchs de football en direct</h1>
+        <form method="get" class="filters">
+            <select name="sport">
+                <option value="">Sport</option>
+                {% for s in sports %}
+                <option value="{{s}}" {% if selected_sport==s %}selected{% endif %}>{{s}}</option>
+                {% endfor %}
+            </select>
+            <select name="ligue">
+                <option value="">Ligue</option>
+                {% for l in ligues %}
+                <option value="{{l}}" {% if selected_ligue==l %}selected{% endif %}>{{l}}</option>
+                {% endfor %}
+            </select>
+            <select name="statut">
+                <option value="">Statut</option>
+                {% for st in statuts %}
+                <option value="{{st}}" {% if selected_statut==st %}selected{% endif %}>{{st}}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Filtrer</button>
+        </form>
+    </header>
+    <main>
+        <table class="matchs">
+            <thead>
+                <tr>
+                    <th>Équipe 1</th>
+                    <th>Score</th>
+                    <th>Équipe 2</th>
+                    <th>Sport</th>
+                    <th>Ligue</th>
+                    <th>Statut</th>
+                    <th>Date & Heure</th>
+                    <th>Température</th>
+                    <th>Humidité</th>
+                    <th>Cotes (1)</th>
+                    <th>Cotes (2)</th>
+                    <th>Cotes (X)</th>
+                    <th>Prédiction</th>
+                    <th>Détails</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in matchs %}
+                <tr>
+                    <td>
+                        {% if m.equipe1_logo %}
+                        <img src="{{m.equipe1_logo}}" alt="{{m.equipe1}}" class="team-logo" style="height:24px;vertical-align:middle;"> 
+                        {% endif %}
+                        {{m.equipe1}}
+                    </td>
+                    <td>{{m.score1}} - {{m.score2}}</td>
+                    <td>
+                        {% if m.equipe2_logo %}
+                        <img src="{{m.equipe2_logo}}" alt="{{m.equipe2}}" class="team-logo" style="height:24px;vertical-align:middle;"> 
+                        {% endif %}
+                        {{m.equipe2}}
+                    </td>
+                    <td>{{m.sport}}</td>
+                    <td>{{m.ligue}}</td>
+                    <td>
+                        {% if m.statut == 'En cours' %}En cours
+                        {% elif m.statut == 'Mi-temps' %}Mi-temps
+                        {% else %}À venir{% endif %}
+                    </td>
+                    <td>{{m.date_heure}}</td>
+                    <td>{{m.temperature}}</td>
+                    <td>{{m.humidite}}</td>
+                    <td>{{m.cotes['1']}}</td>
+                    <td>{{m.cotes['2']}}</td>
+                    <td>{{m.cotes['X']}}</td>
+                    <td>{{m.prediction}}</td>
+                    <td><a href="/details/{{m.id}}">Détails</a></td>
+                </tr>
+                {% if m.handicaps or m.cotes_supplementaires %}
+                <tr class="handicaps-row">
+                    <td colspan="14" style="background:#f9f9f9; font-size:0.95em;">
+                        {% if m.handicaps %}
+                        <strong>Handicaps :</strong>
+                        <ul style="margin:0; padding-left:1em; display:inline-block;">
+                            {% for h in m.handicaps %}
+                            <li>{{h.type}} : {{h.valeur}} ({{h.cote}})</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                        {% if m.cotes_supplementaires %}
+                        <strong>Cotes supplémentaires :</strong>
+                        <ul style="margin:0; padding-left:1em; display:inline-block;">
+                            {% for c in m.cotes_supplementaires %}
+                            <li>{{c.type}} : {{c.valeur}} ({{c.cote}})</li>
+                            {% endfor %}
+                        </ul>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="pagination">
+            {% if page > 1 %}
+            <a href="{{ url_for('index', sport=selected_sport, ligue=selected_ligue, statut=selected_statut, page=page-1) }}">&lt; Précédent</a>
+            {% endif %}
+            <span>Page {{page}} / {{pages}}</span>
+            {% if page < pages %}
+            <a href="{{ url_for('index', sport=selected_sport, ligue=selected_ligue, statut=selected_statut, page=page+1) }}">Suivant &gt;</a>
+            {% endif %}
+        </div>
+    </main>
+    <footer>
+        <p>Créé par <strong>TonNom</strong> | <a href="https://t.me/tontelegram" target="_blank">Telegram</a></p>
+    </footer>
+</body>
+</html>
