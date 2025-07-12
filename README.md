@@ -64,8 +64,7 @@ Git
 ### Installation Locale
 ```bash
 # Cloner le repository
-git clone https://github.com/votre-username/fifa-betting-ai.git
-cd fifa-betting-ai
+https://github.com/MALICK-GITH/fifa12345.git
 
 # Créer un environnement virtuel
 python -m venv venv
