@@ -23,13 +23,7 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 
 db = SQLAlchemy(app)
 
-# Initialiser la base de données au démarrage
-try:
-    with app.app_context():
-        db.create_all()
-        print("✅ Base de données initialisée avec succès!")
-except Exception as e:
-    print(f"⚠️ Erreur initialisation DB: {e}")
+# L'initialisation de la base de données sera faite après la définition des modèles
 
 # Charger le modèle ML au démarrage
 try:
@@ -207,6 +201,39 @@ class AutoLearning(db.Model):
 # Initialiser l'analytics après la définition des modèles
 analytics = TeamAnalytics(db, Match, Team)
 
+# Initialiser la base de données maintenant que tous les modèles sont définis
+try:
+    with app.app_context():
+        # Forcer la recréation des tables pour éviter les erreurs de structure
+        db.drop_all()
+        db.create_all()
+
+        # Vérifier que les tables sont créées
+        inspector = db.inspect(db.engine)
+        tables = inspector.get_table_names()
+        print(f"✅ Base de données initialisée avec succès!")
+        print(f"📊 Tables créées: {', '.join(tables)}")
+
+        # Créer les paramètres d'auto-learning par défaut
+        auto_learning = AutoLearning(
+            auto_training_enabled=True,
+            min_matches_for_training=5,
+            training_frequency_hours=1
+        )
+        db.session.add(auto_learning)
+        db.session.commit()
+        print("🤖 Paramètres d'auto-learning initialisés")
+
+except Exception as e:
+    print(f"⚠️ Erreur initialisation DB: {e}")
+    # Essayer une création simple en cas d'erreur
+    try:
+        with app.app_context():
+            db.create_all()
+            print("✅ Base de données créée en mode simple")
+    except Exception as e2:
+        print(f"❌ Erreur critique DB: {e2}")
+
 # Fonction pour initialiser la base de données
 def init_db():
     """Initialise la base de données avec les tables"""
@@ -254,8 +281,11 @@ def save_match_to_db(match_data):
             match_data['league']
         )
 
+        # Créer un ID unique si pas d'ID API
+        external_id = str(match_data.get('id')) if match_data.get('id') else f"{home_team.id}_{away_team.id}_{match_data['status']}"
+
         # Vérifier si le match existe déjà
-        existing_match = Match.query.filter_by(external_id=str(match_data.get('id'))).first()
+        existing_match = Match.query.filter_by(external_id=external_id).first()
 
         if existing_match:
             # Mettre à jour le match existant
@@ -269,7 +299,7 @@ def save_match_to_db(match_data):
         else:
             # Créer un nouveau match
             match_obj = Match(
-                external_id=str(match_data.get('id')),
+                external_id=external_id,
                 home_team_id=home_team.id,
                 away_team_id=away_team.id,
                 sport=match_data['sport'],
@@ -1075,12 +1105,52 @@ def auto_activity():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route('/debug_matches')
+def debug_matches():
+    """Route de debug pour voir les matchs en base"""
+    try:
+        matches = Match.query.all()
+        result = {
+            "total_matches": len(matches),
+            "matches": []
+        }
+
+        for match in matches:
+            result["matches"].append({
+                "id": match.id,
+                "home_team": match.home_team.name if match.home_team else "N/A",
+                "away_team": match.away_team.name if match.away_team else "N/A",
+                "score": f"{match.home_score}-{match.away_score}",
+                "status": match.status,
+                "created_at": match.created_at.isoformat() if match.created_at else None
+            })
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/match_by_external/<external_id>')
+def match_details_by_external(external_id):
+    """Affiche les détails d'un match par son external_id"""
+    try:
+        match = Match.query.filter_by(external_id=str(external_id)).first_or_404()
+        return match_details(match.id)
+    except Exception as e:
+        return f"Erreur: {str(e)}"
+
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
     """Affiche les détails d'un match spécifique avec analytics intégrés"""
     try:
-        # Récupérer le match depuis la base de données
+        print(f"🔍 Recherche du match avec ID: {match_id}")
+
+        # Vérifier combien de matchs sont en base
+        total_matches = Match.query.count()
+        print(f"📊 Total matchs en base: {total_matches}")
+
+        # Récupérer le match depuis la base de données (par ID interne)
         match = Match.query.get_or_404(match_id)
+        print(f"✅ Match trouvé: {match.home_team.name} vs {match.away_team.name}")
 
         # Récupérer l'évolution des cotes pour ce match
         odds_evolution = MatchEvolution.query.filter_by(match_id=match_id).order_by(MatchEvolution.timestamp).all()
@@ -1318,6 +1388,14 @@ def home():
 
                 # Sauvegarder dans la base de données
                 saved_match = save_match_to_db(match_data)
+
+                # Mettre à jour l'ID avec celui de la base de données
+                if saved_match:
+                    match_data["id"] = saved_match.id
+                    print(f"✅ Match sauvegardé avec ID: {saved_match.id} - {team1} vs {team2}")
+                else:
+                    print(f"❌ Échec sauvegarde match: {team1} vs {team2}")
+                    match_data["id"] = None
 
                 # Sauvegarder l'évolution du match avec les cotes actuelles
                 if saved_match and formatted_odds:
