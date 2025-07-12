@@ -493,7 +493,7 @@ def home():
                     continue
 
                 match_ts = match.get("S", 0)
-                match_time = datetime.datetime.utcfromtimestamp(match_ts).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
+                match_time = datetime.utcfromtimestamp(match_ts).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
 
                 # --- Cotes ---
                 odds_data = []
