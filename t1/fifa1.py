@@ -412,6 +412,504 @@ def calculate_team_form(team_id, days=30):
 
     return form_string, form_score
 
+def get_all_odds_for_match(match):
+    """Récupère toutes les cotes disponibles pour un match"""
+    try:
+        # Récupérer la dernière évolution des cotes
+        latest_evolution = MatchEvolution.query.filter_by(match_id=match.id).order_by(MatchEvolution.timestamp.desc()).first()
+
+        all_odds = {}
+
+        if latest_evolution:
+            # Cotes principales
+            if latest_evolution.odds_1: all_odds["1"] = latest_evolution.odds_1
+            if latest_evolution.odds_x: all_odds["X"] = latest_evolution.odds_x
+            if latest_evolution.odds_2: all_odds["2"] = latest_evolution.odds_2
+
+            # Over/Under
+            if latest_evolution.odds_over_15: all_odds["Over 1.5"] = latest_evolution.odds_over_15
+            if latest_evolution.odds_under_15: all_odds["Under 1.5"] = latest_evolution.odds_under_15
+            if latest_evolution.odds_over_25: all_odds["Over 2.5"] = latest_evolution.odds_over_25
+            if latest_evolution.odds_under_25: all_odds["Under 2.5"] = latest_evolution.odds_under_25
+            if latest_evolution.odds_over_35: all_odds["Over 3.5"] = latest_evolution.odds_over_35
+            if latest_evolution.odds_under_35: all_odds["Under 3.5"] = latest_evolution.odds_under_35
+
+            # BTTS
+            if latest_evolution.odds_btts_yes: all_odds["BTTS Oui"] = latest_evolution.odds_btts_yes
+            if latest_evolution.odds_btts_no: all_odds["BTTS Non"] = latest_evolution.odds_btts_no
+
+            # Double Chance
+            if latest_evolution.odds_1x: all_odds["1X"] = latest_evolution.odds_1x
+            if latest_evolution.odds_12: all_odds["12"] = latest_evolution.odds_12
+            if latest_evolution.odds_x2: all_odds["X2"] = latest_evolution.odds_x2
+
+            # Handicap
+            if latest_evolution.odds_handicap_1_plus: all_odds["Handicap 1 +1.5"] = latest_evolution.odds_handicap_1_plus
+            if latest_evolution.odds_handicap_1_minus: all_odds["Handicap 1 -1.5"] = latest_evolution.odds_handicap_1_minus
+            if latest_evolution.odds_handicap_2_plus: all_odds["Handicap 2 +1.5"] = latest_evolution.odds_handicap_2_plus
+            if latest_evolution.odds_handicap_2_minus: all_odds["Handicap 2 -1.5"] = latest_evolution.odds_handicap_2_minus
+
+            # Autres cotes depuis other_odds
+            if latest_evolution.other_odds:
+                for odd_str in latest_evolution.other_odds.split(';'):
+                    if ':' in odd_str:
+                        bet_type, cote_str = odd_str.split(':', 1)
+                        try:
+                            all_odds[bet_type.strip()] = float(cote_str.strip())
+                        except:
+                            pass
+
+        print(f"📊 Cotes récupérées pour prédictions: {len(all_odds)} types")
+        return all_odds
+
+    except Exception as e:
+        print(f"❌ Erreur récupération cotes: {e}")
+        return {}
+
+def generate_comprehensive_predictions(match, h2h_data, home_form, away_form, all_odds):
+    """Génère toutes les prédictions pour un match avec différentes IA"""
+    predictions = {
+        "match_info": {
+            "home_team": match.home_team.name,
+            "away_team": match.away_team.name,
+            "league": match.league,
+            "status": match.status
+        },
+        "ai_predictions": {},
+        "consensus": {},
+        "confidence_scores": {},
+        "detailed_analysis": {}
+    }
+
+    try:
+        # 1. PRÉDICTION BASÉE SUR LES COTES (IA Cotes) - UTILISE TOUTES LES COTES
+        if all_odds and any(k in all_odds for k in ["1", "X", "2"]):
+            odds_prediction = predict_from_all_odds(all_odds)
+            predictions["ai_predictions"]["odds_ai"] = odds_prediction
+        else:
+            predictions["ai_predictions"]["odds_ai"] = {"prediction": "Données insuffisantes", "confidence": 0.0}
+
+        # 2. PRÉDICTION MACHINE LEARNING (IA ML)
+        ml_prediction = predict_with_ml(match, home_form, away_form)
+        predictions["ai_predictions"]["ml_ai"] = ml_prediction
+
+        # 3. PRÉDICTION ANALYTICS H2H (IA Analytics)
+        analytics_prediction = predict_from_analytics(h2h_data, home_form, away_form)
+        predictions["ai_predictions"]["analytics_ai"] = analytics_prediction
+
+        # 4. PRÉDICTION FORME RÉCENTE (IA Forme)
+        form_prediction = predict_from_form(home_form, away_form)
+        predictions["ai_predictions"]["form_ai"] = form_prediction
+
+        # 5. PRÉDICTION STATISTIQUES AVANCÉES (IA Stats)
+        stats_prediction = predict_from_advanced_stats(match, h2h_data)
+        predictions["ai_predictions"]["stats_ai"] = stats_prediction
+
+        # 6. CONSENSUS ET PRÉDICTION FINALE
+        consensus = calculate_consensus(predictions["ai_predictions"])
+        predictions["consensus"] = consensus
+
+        # 7. PRÉDICTIONS SPÉCIALISÉES - UTILISE TOUTES LES COTES
+        predictions["specialized"] = {
+            "over_under": predict_over_under_from_odds(all_odds, match),
+            "btts": predict_btts_from_odds(all_odds, match, h2h_data),
+            "exact_score": predict_exact_score(match, home_form, away_form),
+            "first_half": predict_first_half_from_odds(all_odds, match)
+        }
+
+        return predictions
+
+    except Exception as e:
+        print(f"❌ Erreur génération prédictions: {e}")
+        return {"error": str(e)}
+
+def predict_from_all_odds(all_odds):
+    """IA basée sur TOUTES les cotes disponibles"""
+    try:
+        # Analyser les cotes 1X2 principales
+        main_odds = {}
+        for key in ["1", "X", "2"]:
+            if key in all_odds:
+                main_odds[key] = all_odds[key]
+
+        if not main_odds:
+            return {"prediction": "Cotes 1X2 manquantes", "confidence": 0.0}
+
+        # Trouver la prédiction principale
+        best_odd = min(main_odds.items(), key=lambda x: x[1])
+        main_confidence = 1.0 / best_odd[1]
+        main_confidence = min(main_confidence, 0.95)
+
+        # Analyser les cotes alternatives pour ajuster la confiance
+        confidence_adjustments = []
+
+        # Double Chance pour confirmer
+        if best_odd[0] == "1" and "1X" in all_odds:
+            dc_confidence = 1.0 / all_odds["1X"]
+            confidence_adjustments.append(dc_confidence * 0.3)
+        elif best_odd[0] == "2" and "X2" in all_odds:
+            dc_confidence = 1.0 / all_odds["X2"]
+            confidence_adjustments.append(dc_confidence * 0.3)
+        elif best_odd[0] == "X" and "1X" in all_odds and "X2" in all_odds:
+            dc_avg = (1.0 / all_odds["1X"] + 1.0 / all_odds["X2"]) / 2
+            confidence_adjustments.append(dc_avg * 0.2)
+
+        # Over/Under pour contexte
+        if "Over 2.5" in all_odds and "Under 2.5" in all_odds:
+            ou_confidence = abs(1.0 / all_odds["Over 2.5"] - 1.0 / all_odds["Under 2.5"])
+            confidence_adjustments.append(ou_confidence * 0.1)
+
+        # BTTS pour contexte
+        if "BTTS Oui" in all_odds and "BTTS Non" in all_odds:
+            btts_confidence = abs(1.0 / all_odds["BTTS Oui"] - 1.0 / all_odds["BTTS Non"])
+            confidence_adjustments.append(btts_confidence * 0.1)
+
+        # Ajuster la confiance finale
+        final_confidence = main_confidence
+        if confidence_adjustments:
+            adjustment = sum(confidence_adjustments) / len(confidence_adjustments)
+            final_confidence = min(main_confidence + adjustment, 0.98)
+
+        prediction_map = {"1": "Victoire Domicile", "X": "Match Nul", "2": "Victoire Extérieur"}
+
+        # Compter les types de cotes analysées
+        analyzed_markets = len([k for k in all_odds.keys() if k in ["1", "X", "2", "1X", "12", "X2", "Over 2.5", "Under 2.5", "BTTS Oui", "BTTS Non"]])
+
+        return {
+            "prediction": prediction_map[best_odd[0]],
+            "confidence": final_confidence,
+            "reasoning": f"Analyse de {analyzed_markets} marchés - Cote principale: {best_odd[1]:.2f}",
+            "main_odds": main_odds,
+            "markets_analyzed": analyzed_markets
+        }
+
+    except Exception as e:
+        return {"prediction": f"Erreur analyse cotes: {str(e)}", "confidence": 0.0}
+
+def predict_over_under_from_odds(all_odds, match):
+    """Prédiction Over/Under basée sur toutes les cotes disponibles"""
+    try:
+        # Chercher les cotes Over/Under 2.5
+        if "Over 2.5" in all_odds and "Under 2.5" in all_odds:
+            over_25 = all_odds["Over 2.5"]
+            under_25 = all_odds["Under 2.5"]
+
+            if over_25 < under_25:
+                confidence = 1.0 / over_25
+                prediction = "Over 2.5"
+            else:
+                confidence = 1.0 / under_25
+                prediction = "Under 2.5"
+
+            # Ajuster avec d'autres seuils
+            adjustments = []
+            if "Over 1.5" in all_odds:
+                adjustments.append(1.0 / all_odds["Over 1.5"])
+            if "Over 3.5" in all_odds:
+                adjustments.append(1.0 / all_odds["Over 3.5"])
+
+            if adjustments:
+                confidence = (confidence + sum(adjustments) / len(adjustments)) / 2
+
+            return {
+                "prediction": prediction,
+                "confidence": min(confidence, 0.9),
+                "reasoning": f"Cotes O/U 2.5: {over_25:.2f}/{under_25:.2f}"
+            }
+
+        # Fallback avec le score actuel
+        total_goals = (match.home_score or 0) + (match.away_score or 0)
+        if total_goals >= 3:
+            return {"prediction": "Over 2.5", "confidence": 0.8, "reasoning": "Score actuel élevé"}
+        else:
+            return {"prediction": "Under 2.5", "confidence": 0.6, "reasoning": "Score actuel faible"}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0, "reasoning": f"Erreur: {str(e)}"}
+
+def predict_btts_from_odds(all_odds, match, h2h_data):
+    """Prédiction BTTS basée sur toutes les cotes disponibles"""
+    try:
+        # Chercher les cotes BTTS
+        if "BTTS Oui" in all_odds and "BTTS Non" in all_odds:
+            btts_yes = all_odds["BTTS Oui"]
+            btts_no = all_odds["BTTS Non"]
+
+            if btts_yes < btts_no:
+                confidence = 1.0 / btts_yes
+                prediction = "BTTS Oui"
+            else:
+                confidence = 1.0 / btts_no
+                prediction = "BTTS Non"
+
+            return {
+                "prediction": prediction,
+                "confidence": min(confidence, 0.9),
+                "reasoning": f"Cotes BTTS: {btts_yes:.2f}/{btts_no:.2f}"
+            }
+
+        # Fallback avec le score actuel
+        if match.home_score is not None and match.away_score is not None:
+            if match.home_score > 0 and match.away_score > 0:
+                return {"prediction": "BTTS Oui", "confidence": 0.9, "reasoning": "Les deux équipes ont déjà marqué"}
+            elif match.home_score == 0 or match.away_score == 0:
+                return {"prediction": "BTTS Non", "confidence": 0.7, "reasoning": "Une équipe n'a pas encore marqué"}
+
+        return {"prediction": "BTTS Oui", "confidence": 0.6, "reasoning": "Prédiction par défaut"}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0, "reasoning": f"Erreur: {str(e)}"}
+
+def predict_first_half_from_odds(all_odds, match):
+    """Prédiction première mi-temps basée sur les cotes"""
+    try:
+        # Chercher les cotes de double chance
+        if "1X" in all_odds:
+            confidence = 1.0 / all_odds["1X"]
+            return {
+                "prediction": "1X (Domicile ou Nul)",
+                "confidence": min(confidence, 0.8),
+                "reasoning": f"Cote 1X: {all_odds['1X']:.2f}"
+            }
+
+        # Fallback basé sur les cotes principales
+        if "1" in all_odds and "X" in all_odds:
+            if all_odds["1"] < all_odds["X"]:
+                return {"prediction": "1 (Domicile)", "confidence": 0.6, "reasoning": "Favori domicile"}
+            else:
+                return {"prediction": "X (Nul)", "confidence": 0.6, "reasoning": "Match équilibré"}
+
+        return {"prediction": "1X", "confidence": 0.5, "reasoning": "Prédiction par défaut"}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0, "reasoning": f"Erreur: {str(e)}"}
+
+def predict_with_ml(match, home_form, away_form):
+    """IA Machine Learning"""
+    try:
+        # Préparer les données pour le ML
+        match_data = {
+            'team1': match.home_team.name,
+            'team2': match.away_team.name,
+            'sport': match.sport,
+            'league': match.league,
+            'temp': match.temperature or 20,
+            'humid': match.humidity or 50,
+            'odds': ['1: 2.0', 'X: 3.0', '2: 2.5']  # Valeurs par défaut
+        }
+
+        ml_pred, ml_conf = get_ml_prediction(match_data)
+
+        if ml_pred:
+            prediction_map = {"1": "Victoire Domicile", "X": "Match Nul", "2": "Victoire Extérieur"}
+            return {
+                "prediction": prediction_map.get(ml_pred, "Indéterminé"),
+                "confidence": ml_conf,
+                "reasoning": "Modèle RandomForest entraîné sur historique",
+                "model_type": "RandomForest"
+            }
+        else:
+            return {"prediction": "Modèle non disponible", "confidence": 0.0}
+
+    except Exception as e:
+        return {"prediction": f"Erreur ML: {str(e)}", "confidence": 0.0}
+
+def predict_from_analytics(h2h_data, home_form, away_form):
+    """IA basée sur les analytics H2H"""
+    try:
+        if not h2h_data:
+            return {"prediction": "Pas d'historique H2H", "confidence": 0.0}
+
+        # Analyser l'historique H2H
+        total_matches = h2h_data.team1_wins + h2h_data.draws + h2h_data.team2_wins
+        if total_matches == 0:
+            return {"prediction": "Historique insuffisant", "confidence": 0.0}
+
+        home_win_rate = h2h_data.team1_wins / total_matches
+        draw_rate = h2h_data.draws / total_matches
+        away_win_rate = h2h_data.team2_wins / total_matches
+
+        rates = {"Victoire Domicile": home_win_rate, "Match Nul": draw_rate, "Victoire Extérieur": away_win_rate}
+        best_prediction = max(rates.items(), key=lambda x: x[1])
+
+        return {
+            "prediction": best_prediction[0],
+            "confidence": best_prediction[1],
+            "reasoning": f"Basé sur {total_matches} matchs H2H",
+            "h2h_stats": rates
+        }
+
+    except Exception as e:
+        return {"prediction": f"Erreur Analytics: {str(e)}", "confidence": 0.0}
+
+def predict_from_form(home_form, away_form):
+    """IA basée sur la forme récente"""
+    try:
+        if not home_form or not away_form:
+            return {"prediction": "Données de forme insuffisantes", "confidence": 0.0}
+
+        home_score = home_form.form_score
+        away_score = away_form.form_score
+
+        if home_score > away_score + 0.2:
+            prediction = "Victoire Domicile"
+            confidence = min((home_score - away_score) * 2, 0.9)
+        elif away_score > home_score + 0.2:
+            prediction = "Victoire Extérieur"
+            confidence = min((away_score - home_score) * 2, 0.9)
+        else:
+            prediction = "Match Nul"
+            confidence = 0.6
+
+        return {
+            "prediction": prediction,
+            "confidence": confidence,
+            "reasoning": f"Forme domicile: {home_score:.1%}, Forme extérieur: {away_score:.1%}",
+            "form_comparison": {"home": home_score, "away": away_score}
+        }
+
+    except Exception as e:
+        return {"prediction": f"Erreur Forme: {str(e)}", "confidence": 0.0}
+
+def predict_from_advanced_stats(match, h2h_data):
+    """IA basée sur les statistiques avancées"""
+    try:
+        # Facteurs multiples pour une prédiction avancée
+        factors = {
+            "league_factor": 0.7 if "Champions" in match.league else 0.5,
+            "status_factor": 0.8 if match.status == "En cours" else 0.6,
+            "score_factor": 0.0
+        }
+
+        # Analyser le score actuel si en cours
+        if match.status.startswith("En cours") and match.home_score is not None and match.away_score is not None:
+            score_diff = match.home_score - match.away_score
+            if score_diff > 0:
+                factors["score_factor"] = 0.8
+                prediction = "Victoire Domicile"
+            elif score_diff < 0:
+                factors["score_factor"] = 0.8
+                prediction = "Victoire Extérieur"
+            else:
+                factors["score_factor"] = 0.6
+                prediction = "Match Nul"
+        else:
+            prediction = "Victoire Domicile"  # Avantage domicile par défaut
+            factors["score_factor"] = 0.6
+
+        confidence = sum(factors.values()) / len(factors)
+
+        return {
+            "prediction": prediction,
+            "confidence": confidence,
+            "reasoning": "Analyse multi-facteurs (ligue, statut, score)",
+            "factors": factors
+        }
+
+    except Exception as e:
+        return {"prediction": f"Erreur Stats: {str(e)}", "confidence": 0.0}
+
+def calculate_consensus(ai_predictions):
+    """Calcule le consensus de toutes les IA"""
+    try:
+        votes = {"Victoire Domicile": 0, "Match Nul": 0, "Victoire Extérieur": 0}
+        total_confidence = 0
+        valid_predictions = 0
+
+        for ai_name, pred_data in ai_predictions.items():
+            if isinstance(pred_data, dict) and pred_data.get("confidence", 0) > 0:
+                prediction = pred_data["prediction"]
+                confidence = pred_data["confidence"]
+
+                if prediction in votes:
+                    votes[prediction] += confidence
+                    total_confidence += confidence
+                    valid_predictions += 1
+
+        if valid_predictions == 0:
+            return {"prediction": "Consensus impossible", "confidence": 0.0}
+
+        # Trouver la prédiction avec le plus de votes pondérés
+        best_prediction = max(votes.items(), key=lambda x: x[1])
+        consensus_confidence = best_prediction[1] / total_confidence if total_confidence > 0 else 0
+
+        return {
+            "prediction": best_prediction[0],
+            "confidence": consensus_confidence,
+            "votes": votes,
+            "participating_ais": valid_predictions,
+            "reasoning": f"Consensus de {valid_predictions} IA"
+        }
+
+    except Exception as e:
+        return {"prediction": f"Erreur Consensus: {str(e)}", "confidence": 0.0}
+
+def predict_over_under(match, latest_evolution):
+    """Prédiction Over/Under 2.5 buts"""
+    try:
+        if latest_evolution and latest_evolution.odds_over_25 and latest_evolution.odds_under_25:
+            if latest_evolution.odds_over_25 < latest_evolution.odds_under_25:
+                return {"prediction": "Over 2.5", "confidence": 1.0 / latest_evolution.odds_over_25}
+            else:
+                return {"prediction": "Under 2.5", "confidence": 1.0 / latest_evolution.odds_under_25}
+
+        # Fallback basé sur le score actuel
+        total_goals = (match.home_score or 0) + (match.away_score or 0)
+        if total_goals >= 3:
+            return {"prediction": "Over 2.5", "confidence": 0.8}
+        else:
+            return {"prediction": "Under 2.5", "confidence": 0.6}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0}
+
+def predict_btts(match, h2h_data):
+    """Prédiction Both Teams to Score"""
+    try:
+        # Basé sur le score actuel
+        if match.home_score and match.away_score and match.home_score > 0 and match.away_score > 0:
+            return {"prediction": "BTTS Oui", "confidence": 0.9}
+        elif match.home_score is not None and match.away_score is not None:
+            if match.home_score == 0 or match.away_score == 0:
+                return {"prediction": "BTTS Non", "confidence": 0.7}
+
+        # Fallback
+        return {"prediction": "BTTS Oui", "confidence": 0.6}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0}
+
+def predict_exact_score(match, home_form, away_form):
+    """Prédiction de score exact"""
+    try:
+        # Scores les plus probables basés sur la forme
+        if home_form and away_form:
+            home_strength = home_form.form_score
+            away_strength = away_form.form_score
+
+            if home_strength > 0.7:
+                return {"prediction": "2-1", "confidence": 0.3}
+            elif away_strength > 0.7:
+                return {"prediction": "1-2", "confidence": 0.3}
+            else:
+                return {"prediction": "1-1", "confidence": 0.4}
+
+        return {"prediction": "1-1", "confidence": 0.3}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0}
+
+def predict_first_half(match, latest_evolution):
+    """Prédiction première mi-temps"""
+    try:
+        if latest_evolution and latest_evolution.odds_1x:
+            return {"prediction": "1X", "confidence": 1.0 / latest_evolution.odds_1x}
+
+        return {"prediction": "1X", "confidence": 0.6}
+
+    except Exception as e:
+        return {"prediction": "Indéterminé", "confidence": 0.0}
+
 # Fonctions d'apprentissage automatique
 def save_match_evolution(match_obj, odds_data, status, minute=None):
     """Sauvegarde l'évolution d'un match avec TOUTES ses cotes"""
@@ -430,10 +928,10 @@ def save_match_evolution(match_obj, odds_data, status, minute=None):
 
         other_odds_list = []
 
-        # Extraire TOUTES les cotes
+        # Extraire TOUTES les cotes avec mapping amélioré
         for odd_str in odds_data:
             if isinstance(odd_str, str) and ':' in odd_str:
-                bet_type, odds_value = odd_str.split(': ')
+                bet_type, odds_value = odd_str.split(': ', 1)
                 try:
                     odds_val = float(odds_value)
 
@@ -445,35 +943,32 @@ def save_match_evolution(match_obj, odds_data, status, minute=None):
                     elif bet_type == '2':
                         odds_dict['odds_2'] = odds_val
 
-                    # Cotes Over/Under
-                    elif 'Over 1.5' in bet_type or 'Plus de 1.5' in bet_type:
-                        odds_dict['odds_over_15'] = odds_val
-                    elif 'Under 1.5' in bet_type or 'Moins de 1.5' in bet_type:
-                        odds_dict['odds_under_15'] = odds_val
-                    elif 'Over 2.5' in bet_type or 'Plus de 2.5' in bet_type:
-                        odds_dict['odds_over_25'] = odds_val
-                    elif 'Under 2.5' in bet_type or 'Moins de 2.5' in bet_type:
-                        odds_dict['odds_under_25'] = odds_val
-                    elif 'Over 3.5' in bet_type or 'Plus de 3.5' in bet_type:
-                        odds_dict['odds_over_35'] = odds_val
-                    elif 'Under 3.5' in bet_type or 'Moins de 3.5' in bet_type:
-                        odds_dict['odds_under_35'] = odds_val
+                    # Cotes Over/Under avec détection flexible
+                    elif 'Over' in bet_type:
+                        if '1.5' in bet_type:
+                            odds_dict['odds_over_15'] = odds_val
+                        elif '2.5' in bet_type:
+                            odds_dict['odds_over_25'] = odds_val
+                        elif '3.5' in bet_type:
+                            odds_dict['odds_over_35'] = odds_val
+                        else:
+                            other_odds_list.append(f"{bet_type}: {odds_val}")
+
+                    elif 'Under' in bet_type:
+                        if '1.5' in bet_type:
+                            odds_dict['odds_under_15'] = odds_val
+                        elif '2.5' in bet_type:
+                            odds_dict['odds_under_25'] = odds_val
+                        elif '3.5' in bet_type:
+                            odds_dict['odds_under_35'] = odds_val
+                        else:
+                            other_odds_list.append(f"{bet_type}: {odds_val}")
 
                     # Both Teams to Score
-                    elif 'BTTS Yes' in bet_type or 'Les deux marquent' in bet_type:
+                    elif 'BTTS Oui' in bet_type or 'BTTS Yes' in bet_type:
                         odds_dict['odds_btts_yes'] = odds_val
-                    elif 'BTTS No' in bet_type or 'Au moins une ne marque pas' in bet_type:
+                    elif 'BTTS Non' in bet_type or 'BTTS No' in bet_type:
                         odds_dict['odds_btts_no'] = odds_val
-
-                    # Handicap
-                    elif 'Handicap 1 +' in bet_type:
-                        odds_dict['odds_handicap_1_plus'] = odds_val
-                    elif 'Handicap 1 -' in bet_type:
-                        odds_dict['odds_handicap_1_minus'] = odds_val
-                    elif 'Handicap 2 +' in bet_type:
-                        odds_dict['odds_handicap_2_plus'] = odds_val
-                    elif 'Handicap 2 -' in bet_type:
-                        odds_dict['odds_handicap_2_minus'] = odds_val
 
                     # Double Chance
                     elif bet_type == '1X':
@@ -483,11 +978,16 @@ def save_match_evolution(match_obj, odds_data, status, minute=None):
                     elif bet_type == 'X2':
                         odds_dict['odds_x2'] = odds_val
 
+                    # Handicap (à améliorer selon les données réelles)
+                    elif 'Handicap' in bet_type:
+                        other_odds_list.append(f"{bet_type}: {odds_val}")
+
                     # Autres cotes
                     else:
                         other_odds_list.append(f"{bet_type}: {odds_val}")
 
-                except:
+                except ValueError:
+                    print(f"⚠️ Impossible de convertir la cote: {bet_type}: {odds_value}")
                     pass
 
         # Créer l'entrée d'évolution avec TOUTES les cotes
@@ -1143,7 +1643,9 @@ def debug_matches():
             result["matches"].append({
                 "id": match.id,
                 "home_team": match.home_team.name if match.home_team else "N/A",
+                "home_team_logo": match.home_team.logo_url if match.home_team else None,
                 "away_team": match.away_team.name if match.away_team else "N/A",
+                "away_team_logo": match.away_team.logo_url if match.away_team else None,
                 "score": f"{match.home_score}-{match.away_score}",
                 "status": match.status,
                 "created_at": match.created_at.isoformat() if match.created_at else None
@@ -1152,6 +1654,160 @@ def debug_matches():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)})
+
+@app.route('/debug_logos')
+def debug_logos():
+    """Route de debug pour voir les logos des équipes"""
+    try:
+        teams = Team.query.all()
+        result = {
+            "total_teams": len(teams),
+            "teams_with_logos": 0,
+            "teams": []
+        }
+
+        for team in teams:
+            team_data = {
+                "id": team.id,
+                "name": team.name,
+                "logo_url": team.logo_url,
+                "team_code": team.team_code,
+                "has_logo": bool(team.logo_url)
+            }
+            result["teams"].append(team_data)
+            if team.logo_url:
+                result["teams_with_logos"] += 1
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/debug_api_logos')
+def debug_api_logos():
+    """Route de debug pour voir les logos dans l'API"""
+    try:
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=10&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        response = requests.get(api_url)
+        matches = response.json().get("Value", [])
+
+        result = {
+            "total_matches": len(matches),
+            "matches_with_logos": 0,
+            "logo_samples": []
+        }
+
+        for i, match in enumerate(matches[:5]):  # Prendre seulement les 5 premiers
+            team1 = match.get("O1", "–")
+            team2 = match.get("O2", "–")
+            o1img = match.get("O1IMG")
+            o2img = match.get("O2IMG")
+
+            sample = {
+                "match_index": i,
+                "team1": team1,
+                "team2": team2,
+                "O1IMG": o1img,
+                "O2IMG": o2img,
+                "O1IMG_type": type(o1img).__name__,
+                "O2IMG_type": type(o2img).__name__
+            }
+
+            if o1img or o2img:
+                result["matches_with_logos"] += 1
+
+            result["logo_samples"].append(sample)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/debug_odds')
+def debug_odds():
+    """Route de debug pour voir toutes les cotes disponibles dans l'API"""
+    try:
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=5&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        response = requests.get(api_url)
+        matches = response.json().get("Value", [])
+
+        result = {
+            "total_matches": len(matches),
+            "odds_analysis": []
+        }
+
+        for i, match in enumerate(matches[:3]):  # Analyser les 3 premiers matchs
+            team1 = match.get("O1", "–")
+            team2 = match.get("O2", "–")
+
+            analysis = {
+                "match_index": i,
+                "teams": f"{team1} vs {team2}",
+                "E_odds": [],  # Cotes principales
+                "AE_odds": []  # Cotes alternatives
+            }
+
+            # Analyser les cotes principales (E)
+            for odd in match.get("E", []):
+                analysis["E_odds"].append({
+                    "G": odd.get("G"),  # Groupe
+                    "T": odd.get("T"),  # Type
+                    "C": odd.get("C"),  # Cote
+                    "P": odd.get("P")   # Paramètre
+                })
+
+            # Analyser les cotes alternatives (AE)
+            for ae in match.get("AE", []):
+                for me in ae.get("ME", []):
+                    analysis["AE_odds"].append({
+                        "G": me.get("G"),  # Groupe
+                        "T": me.get("T"),  # Type
+                        "C": me.get("C"),  # Cote
+                        "P": me.get("P")   # Paramètre
+                    })
+
+            result["odds_analysis"].append(analysis)
+
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/test_logos')
+def test_logos():
+    """Page de test pour voir les logos"""
+    try:
+        # Récupérer le premier match avec des équipes
+        match = Match.query.first()
+        if not match:
+            return "Aucun match en base de données"
+
+        return f"""
+        <!DOCTYPE html>
+        <html><head><title>Test Logos</title></head><body>
+        <h2>Test d'affichage des logos</h2>
+        <div style="padding: 20px;">
+            <h3>Match: {match.home_team.name} vs {match.away_team.name}</h3>
+
+            <div style="display: flex; gap: 20px; align-items: center;">
+                <div>
+                    <h4>Équipe domicile: {match.home_team.name}</h4>
+                    <p>Logo URL: {match.home_team.logo_url or 'Aucun logo'}</p>
+                    {f'<img src="{match.home_team.logo_url}" style="width: 64px; height: 64px; border: 1px solid #ccc;" onerror="this.style.display=\'none\'">' if match.home_team.logo_url else '<div style="width: 64px; height: 64px; background: #3498db; color: white; display: flex; align-items: center; justify-content: center; border-radius: 50%;">' + (match.home_team.name[0] if match.home_team.name else '?') + '</div>'}
+                </div>
+
+                <div>
+                    <h4>Équipe extérieur: {match.away_team.name}</h4>
+                    <p>Logo URL: {match.away_team.logo_url or 'Aucun logo'}</p>
+                    {f'<img src="{match.away_team.logo_url}" style="width: 64px; height: 64px; border: 1px solid #ccc;" onerror="this.style.display=\'none\'">' if match.away_team.logo_url else '<div style="width: 64px; height: 64px; background: #e74c3c; color: white; display: flex; align-items: center; justify-content: center; border-radius: 50%;">' + (match.away_team.name[0] if match.away_team.name else '?') + '</div>'}
+                </div>
+            </div>
+
+            <p><a href="/match/{match.id}">Voir la page détails de ce match</a></p>
+            <p><a href="/debug_logos">Voir tous les logos en base</a></p>
+            <p><a href="/">Retour à l'accueil</a></p>
+        </div>
+        </body></html>
+        """
+    except Exception as e:
+        return f"Erreur: {str(e)}"
 
 @app.route('/match_by_external/<external_id>')
 def match_details_by_external(external_id):
@@ -1175,6 +1831,8 @@ def match_details(match_id):
         # Récupérer le match depuis la base de données (par ID interne)
         match = Match.query.get_or_404(match_id)
         print(f"✅ Match trouvé: {match.home_team.name} vs {match.away_team.name}")
+        print(f"🎨 Logo équipe domicile: {match.home_team.logo_url}")
+        print(f"🎨 Logo équipe extérieur: {match.away_team.logo_url}")
 
         # Récupérer l'évolution des cotes pour ce match
         odds_evolution = MatchEvolution.query.filter_by(match_id=match_id).order_by(MatchEvolution.timestamp).all()
@@ -1185,6 +1843,12 @@ def match_details(match_id):
         # Récupérer la forme des équipes
         home_form = analytics.get_team_recent_form(match.home_team.name)
         away_form = analytics.get_team_recent_form(match.away_team.name)
+
+        # Récupérer toutes les cotes pour ce match
+        all_match_odds = get_all_odds_for_match(match)
+
+        # Générer toutes les prédictions pour ce match
+        predictions = generate_comprehensive_predictions(match, h2h_data, home_form, away_form, all_match_odds)
 
         # Préparer les données pour les graphiques
         odds_data = {
@@ -1207,13 +1871,31 @@ def match_details(match_id):
             'odds_x2': [evo.odds_x2 for evo in odds_evolution if evo.odds_x2]
         }
 
+        # Si pas de données d'évolution, créer des données de test
+        if not odds_evolution:
+            print(f"⚠️ Pas d'évolution de cotes pour le match {match_id}, création de données de test")
+            odds_data = {
+                'timestamps': ['19:00', '19:30', '20:00'],
+                'odds_1': [2.1, 2.0, 1.9],
+                'odds_x': [3.2, 3.1, 3.0],
+                'odds_2': [3.5, 3.6, 3.7],
+                'odds_over_25': [1.8, 1.75, 1.7],
+                'odds_under_25': [2.0, 2.05, 2.1],
+                'odds_btts_yes': [1.9, 1.85, 1.8],
+                'odds_btts_no': [1.9, 1.95, 2.0],
+                'odds_1x': [1.3, 1.28, 1.25],
+                'odds_12': [1.2, 1.18, 1.15],
+                'odds_x2': [1.7, 1.72, 1.75]
+            }
+
         return render_template_string(MATCH_DETAILS_TEMPLATE,
                                     match=match,
                                     odds_evolution=odds_evolution,
                                     h2h_data=h2h_data,
                                     home_form=home_form,
                                     away_form=away_form,
-                                    odds_data=odds_data)
+                                    odds_data=odds_data,
+                                    predictions=predictions)
 
     except Exception as e:
         return f"Erreur: {str(e)}"
@@ -1317,29 +1999,148 @@ def home():
                 match_ts = match.get("S", 0)
                 match_time = datetime.utcfromtimestamp(match_ts).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
 
-                # --- Cotes ---
-                odds_data = []
-                # 1. Chercher dans E (G=1)
+                # --- Extraction ULTRA-COMPLÈTE des cotes ---
+                all_odds = {}  # Dictionnaire pour stocker toutes les cotes
+
+                # 1. Extraire les cotes principales (E)
                 for o in match.get("E", []):
-                    if o.get("G") == 1 and o.get("T") in [1, 2, 3] and o.get("C") is not None:
-                        odds_data.append({
-                            "type": {1: "1", 2: "2", 3: "X"}.get(o.get("T")),
-                            "cote": o.get("C")
-                        })
-                # 2. Sinon, chercher dans AE
-                if not odds_data:
-                    for ae in match.get("AE", []):
-                        if ae.get("G") == 1:
-                            for o in ae.get("ME", []):
-                                if o.get("T") in [1, 2, 3] and o.get("C") is not None:
-                                    odds_data.append({
-                                        "type": {1: "1", 2: "2", 3: "X"}.get(o.get("T")),
-                                        "cote": o.get("C")
-                                    })
-                if not odds_data:
-                    formatted_odds = ["Pas de cotes disponibles"]
+                    group = o.get("G")
+                    bet_type = o.get("T")
+                    cote = o.get("C")
+                    param = o.get("P")
+
+                    if cote is not None:
+                        # Cotes 1X2 (G=1)
+                        if group == 1 and bet_type in [1, 2, 3]:
+                            all_odds[{1: "1", 2: "2", 3: "X"}[bet_type]] = cote
+
+                        # Over/Under buts totaux
+                        elif group == 5:
+                            if param and param > 0:
+                                all_odds[f"Over {param}"] = cote
+                            elif param and param < 0:
+                                all_odds[f"Under {abs(param)}"] = cote
+
+                        # Double Chance (G=2)
+                        elif group == 2:
+                            if bet_type == 1:
+                                all_odds["1X"] = cote
+                            elif bet_type == 2:
+                                all_odds["12"] = cote
+                            elif bet_type == 3:
+                                all_odds["X2"] = cote
+
+                        # BTTS (G=3)
+                        elif group == 3:
+                            if bet_type == 1:
+                                all_odds["BTTS Oui"] = cote
+                            elif bet_type == 2:
+                                all_odds["BTTS Non"] = cote
+
+                        # Handicap (G=4)
+                        elif group == 4:
+                            if param:
+                                if bet_type == 1:
+                                    all_odds[f"Handicap 1 ({param:+g})"] = cote
+                                elif bet_type == 2:
+                                    all_odds[f"Handicap 2 ({param:+g})"] = cote
+
+                        # Score exact (G=6)
+                        elif group == 6:
+                            all_odds[f"Score exact {bet_type}"] = cote
+
+                        # Mi-temps/Fin (G=7)
+                        elif group == 7:
+                            all_odds[f"Mi-temps/Fin {bet_type}"] = cote
+
+                        # Premier buteur (G=8)
+                        elif group == 8:
+                            all_odds[f"Premier buteur {bet_type}"] = cote
+
+                        # Autres groupes
+                        else:
+                            all_odds[f"Groupe {group} Type {bet_type}"] = cote
+
+                # 2. Extraire les cotes alternatives (AE) - TOUTES
+                for ae in match.get("AE", []):
+                    for o in ae.get("ME", []):
+                        group = o.get("G")
+                        bet_type = o.get("T")
+                        cote = o.get("C")
+                        param = o.get("P")
+
+                        if cote is not None:
+                            # Cotes 1X2 si pas encore trouvées
+                            if group == 1 and bet_type in [1, 2, 3]:
+                                key = {1: "1", 2: "2", 3: "X"}[bet_type]
+                                if key not in all_odds:
+                                    all_odds[key] = cote
+
+                            # Over/Under avec tous les paramètres
+                            elif group == 5 and param is not None:
+                                if param > 0:
+                                    all_odds[f"Over {param}"] = cote
+                                else:
+                                    all_odds[f"Under {abs(param)}"] = cote
+
+                            # Double Chance
+                            elif group == 2:
+                                dc_map = {1: "1X", 2: "12", 3: "X2"}
+                                if bet_type in dc_map and dc_map[bet_type] not in all_odds:
+                                    all_odds[dc_map[bet_type]] = cote
+
+                            # BTTS
+                            elif group == 3:
+                                btts_map = {1: "BTTS Oui", 2: "BTTS Non"}
+                                if bet_type in btts_map and btts_map[bet_type] not in all_odds:
+                                    all_odds[btts_map[bet_type]] = cote
+
+                            # Handicap
+                            elif group == 4 and param is not None:
+                                if bet_type == 1:
+                                    all_odds[f"Handicap 1 ({param:+g})"] = cote
+                                elif bet_type == 2:
+                                    all_odds[f"Handicap 2 ({param:+g})"] = cote
+
+                            # Corners
+                            elif group == 9:
+                                if param:
+                                    all_odds[f"Corners Over {param}"] = cote
+                                else:
+                                    all_odds[f"Corners {bet_type}"] = cote
+
+                            # Cartons
+                            elif group == 10:
+                                if param:
+                                    all_odds[f"Cartons Over {param}"] = cote
+                                else:
+                                    all_odds[f"Cartons {bet_type}"] = cote
+
+                            # Autres cotes alternatives
+                            else:
+                                if param:
+                                    all_odds[f"G{group}T{bet_type}P{param}"] = cote
+                                else:
+                                    all_odds[f"G{group}T{bet_type}"] = cote
+
+                # Formater les cotes pour l'affichage (seulement 1X2 pour page principale)
+                main_odds = []
+                for bet_type in ["1", "X", "2"]:
+                    if bet_type in all_odds:
+                        main_odds.append(f"{bet_type}: {all_odds[bet_type]}")
+
+                if main_odds:
+                    formatted_odds = main_odds  # Seulement 1X2 pour la page principale
+                    print(f"📊 Cotes extraites pour {team1} vs {team2}: {len(all_odds)} types (affichage: 1X2)")
                 else:
-                    formatted_odds = [f"{od['type']}: {od['cote']}" for od in odds_data]
+                    formatted_odds = ["Pas de cotes disponibles"]
+                    print(f"❌ Aucune cote trouvée pour {team1} vs {team2}")
+
+                # Prédiction basée sur les cotes 1X2
+                odds_data = []
+                for bet_type in ["1", "X", "2"]:
+                    if bet_type in all_odds:
+                        odds_data.append({"type": bet_type, "cote": all_odds[bet_type]})
 
                 prediction = "–"
                 if odds_data:
@@ -1366,7 +2167,8 @@ def home():
                     "datetime": match_time,
                     "temp": temp,
                     "humid": humid,
-                    "odds": formatted_odds,
+                    "odds": formatted_odds,  # Seulement 1X2 pour affichage
+                    "all_odds": all_odds,    # TOUTES les cotes pour les prédictions
                     "prediction": prediction,
                     "id": match.get("I", None),
                     "team1_logo": team1_logo,
@@ -2343,24 +3145,330 @@ MATCH_DETAILS_TEMPLATE = """<!DOCTYPE html>
 
         <div class="match-header">
             <div class="match-title">
-                <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
                         {% if match.home_team.logo_url %}
-                        <img src="{{ match.home_team.logo_url }}" alt="{{ match.home_team.name }}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'">
+                        <img src="{{ match.home_team.logo_url }}" alt="{{ match.home_team.name }}"
+                             style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 3px solid #3498db;"
+                             onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMzIiIGZpbGw9IiMzNDk4ZGIiLz4KPHRleHQgeD0iMzIiIHk9IjM4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1zaXplPSIyMCIgZm9udC1mYW1pbHk9IkFyaWFsIj57eyBtYXRjaC5ob21lX3RlYW0ubmFtZVswXSB9fTwvdGV4dD4KPC9zdmc+Cg=='">
+                        {% else %}
+                        <div style="width: 64px; height: 64px; border-radius: 50%; background: #3498db; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold; border: 3px solid #2980b9;">
+                            {{ match.home_team.name[0] if match.home_team.name else '?' }}
+                        </div>
                         {% endif %}
-                        <span>{{ match.home_team.name }}</span>
+                        <span style="font-weight: bold; text-align: center;">{{ match.home_team.name }}</span>
                     </div>
-                    <span style="font-size: 24px;">vs</span>
-                    <div style="display: flex; align-items: center; gap: 8px;">
+
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                        <span style="font-size: 32px; font-weight: bold; color: #e74c3c;">VS</span>
+                        <span style="font-size: 28px; font-weight: bold;">{{ match.home_score }} - {{ match.away_score }}</span>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 10px;">
                         {% if match.away_team.logo_url %}
-                        <img src="{{ match.away_team.logo_url }}" alt="{{ match.away_team.name }}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'">
+                        <img src="{{ match.away_team.logo_url }}" alt="{{ match.away_team.name }}"
+                             style="width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 3px solid #e74c3c;"
+                             onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCA2NCA2NCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMzIiIGN5PSIzMiIgcj0iMzIiIGZpbGw9IiNlNzRjM2MiLz4KPHRleHQgeD0iMzIiIHk9IjM4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJ3aGl0ZSIgZm9udC1zaXplPSIyMCIgZm9udC1mYW1pbHk9IkFyaWFsIj57eyBtYXRjaC5hd2F5X3RlYW0ubmFtZVswXSB9fTwvdGV4dD4KPC9zdmc+Cg=='">
+                        {% else %}
+                        <div style="width: 64px; height: 64px; border-radius: 50%; background: #e74c3c; display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; font-weight: bold; border: 3px solid #c0392b;">
+                            {{ match.away_team.name[0] if match.away_team.name else '?' }}
+                        </div>
                         {% endif %}
-                        <span>{{ match.away_team.name }}</span>
+                        <span style="font-weight: bold; text-align: center;">{{ match.away_team.name }}</span>
                     </div>
                 </div>
             </div>
             <div style="font-size: 24px; margin: 10px 0;">{{ match.home_score }} - {{ match.away_score }}</div>
             <div>{{ match.sport }} • {{ match.league }} • {{ match.status }}</div>
+        </div>
+
+        <!-- SECTION PRÉDICTIONS IA -->
+        <div class="predictions-section" style="background: var(--bg-secondary); border-radius: 10px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="text-align: center; color: var(--text-primary); margin-bottom: 25px; font-size: 28px;">
+                🤖 PRÉDICTIONS INTELLIGENCE ARTIFICIELLE
+            </h2>
+
+            <!-- Consensus Principal -->
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 20px; margin-bottom: 25px; color: white; text-align: center;">
+                <h3 style="margin: 0 0 10px 0; font-size: 24px;">🏆 CONSENSUS IA</h3>
+                <div style="font-size: 32px; font-weight: bold; margin: 10px 0;">
+                    {{ predictions.consensus.prediction if predictions.consensus else 'Calcul en cours...' }}
+                </div>
+                <div style="font-size: 18px; opacity: 0.9;">
+                    Confiance: {{ "%.1f"|format((predictions.consensus.confidence * 100) if predictions.consensus else 0) }}%
+                    {% if predictions.consensus %}
+                    | {{ predictions.consensus.participating_ais }} IA participantes
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Grille des IA -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 25px;">
+
+                <!-- IA Cotes -->
+                <div class="ai-card" style="background: linear-gradient(135deg, #ff6b6b, #ee5a24); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                        💰 IA COTES
+                        <span style="font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                            {{ "%.0f"|format((predictions.ai_predictions.odds_ai.confidence * 100) if predictions.ai_predictions.odds_ai else 0) }}%
+                        </span>
+                    </h4>
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                        {{ predictions.ai_predictions.odds_ai.prediction if predictions.ai_predictions.odds_ai else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; opacity: 0.9;">
+                        {{ predictions.ai_predictions.odds_ai.reasoning if predictions.ai_predictions.odds_ai else '' }}
+                    </div>
+                </div>
+
+                <!-- IA Machine Learning -->
+                <div class="ai-card" style="background: linear-gradient(135deg, #74b9ff, #0984e3); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                        🧠 IA MACHINE LEARNING
+                        <span style="font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                            {{ "%.0f"|format((predictions.ai_predictions.ml_ai.confidence * 100) if predictions.ai_predictions.ml_ai else 0) }}%
+                        </span>
+                    </h4>
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                        {{ predictions.ai_predictions.ml_ai.prediction if predictions.ai_predictions.ml_ai else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; opacity: 0.9;">
+                        {{ predictions.ai_predictions.ml_ai.reasoning if predictions.ai_predictions.ml_ai else '' }}
+                    </div>
+                </div>
+
+                <!-- IA Analytics -->
+                <div class="ai-card" style="background: linear-gradient(135deg, #55a3ff, #003d82); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                        📊 IA ANALYTICS H2H
+                        <span style="font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                            {{ "%.0f"|format((predictions.ai_predictions.analytics_ai.confidence * 100) if predictions.ai_predictions.analytics_ai else 0) }}%
+                        </span>
+                    </h4>
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                        {{ predictions.ai_predictions.analytics_ai.prediction if predictions.ai_predictions.analytics_ai else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; opacity: 0.9;">
+                        {{ predictions.ai_predictions.analytics_ai.reasoning if predictions.ai_predictions.analytics_ai else '' }}
+                    </div>
+                </div>
+
+                <!-- IA Forme -->
+                <div class="ai-card" style="background: linear-gradient(135deg, #00b894, #00a085); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                        📈 IA FORME RÉCENTE
+                        <span style="font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                            {{ "%.0f"|format((predictions.ai_predictions.form_ai.confidence * 100) if predictions.ai_predictions.form_ai else 0) }}%
+                        </span>
+                    </h4>
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                        {{ predictions.ai_predictions.form_ai.prediction if predictions.ai_predictions.form_ai else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; opacity: 0.9;">
+                        {{ predictions.ai_predictions.form_ai.reasoning if predictions.ai_predictions.form_ai else '' }}
+                    </div>
+                </div>
+
+                <!-- IA Stats Avancées -->
+                <div class="ai-card" style="background: linear-gradient(135deg, #fd79a8, #e84393); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 12px 0; display: flex; align-items: center; gap: 8px;">
+                        🎯 IA STATS AVANCÉES
+                        <span style="font-size: 12px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px;">
+                            {{ "%.0f"|format((predictions.ai_predictions.stats_ai.confidence * 100) if predictions.ai_predictions.stats_ai else 0) }}%
+                        </span>
+                    </h4>
+                    <div style="font-size: 18px; font-weight: bold; margin-bottom: 8px;">
+                        {{ predictions.ai_predictions.stats_ai.prediction if predictions.ai_predictions.stats_ai else 'N/A' }}
+                    </div>
+                    <div style="font-size: 14px; opacity: 0.9;">
+                        {{ predictions.ai_predictions.stats_ai.reasoning if predictions.ai_predictions.stats_ai else '' }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Prédictions Spécialisées -->
+            <div style="background: var(--bg-primary); border-radius: 12px; padding: 20px;">
+                <h3 style="text-align: center; margin-bottom: 20px; color: var(--text-primary);">🎲 PRÉDICTIONS SPÉCIALISÉES</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+
+                    <div style="text-align: center; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+                        <div style="font-weight: bold; color: #e67e22; margin-bottom: 5px;">⚽ Over/Under 2.5</div>
+                        <div style="font-size: 18px; font-weight: bold;">
+                            {{ predictions.specialized.over_under.prediction if predictions.specialized else 'N/A' }}
+                        </div>
+                        <div style="font-size: 12px; opacity: 0.7;">
+                            {{ "%.0f"|format((predictions.specialized.over_under.confidence * 100) if predictions.specialized else 0) }}% confiance
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+                        <div style="font-weight: bold; color: #9b59b6; margin-bottom: 5px;">🎯 BTTS</div>
+                        <div style="font-size: 18px; font-weight: bold;">
+                            {{ predictions.specialized.btts.prediction if predictions.specialized else 'N/A' }}
+                        </div>
+                        <div style="font-size: 12px; opacity: 0.7;">
+                            {{ "%.0f"|format((predictions.specialized.btts.confidence * 100) if predictions.specialized else 0) }}% confiance
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+                        <div style="font-weight: bold; color: #27ae60; margin-bottom: 5px;">🏆 Score Exact</div>
+                        <div style="font-size: 18px; font-weight: bold;">
+                            {{ predictions.specialized.exact_score.prediction if predictions.specialized else 'N/A' }}
+                        </div>
+                        <div style="font-size: 12px; opacity: 0.7;">
+                            {{ "%.0f"|format((predictions.specialized.exact_score.confidence * 100) if predictions.specialized else 0) }}% confiance
+                        </div>
+                    </div>
+
+                    <div style="text-align: center; padding: 15px; background: var(--bg-secondary); border-radius: 8px;">
+                        <div style="font-weight: bold; color: #3498db; margin-bottom: 5px;">⏰ 1ère Mi-temps</div>
+                        <div style="font-size: 18px; font-weight: bold;">
+                            {{ predictions.specialized.first_half.prediction if predictions.specialized else 'N/A' }}
+                        </div>
+                        <div style="font-size: 12px; opacity: 0.7;">
+                            {{ "%.0f"|format((predictions.specialized.first_half.confidence * 100) if predictions.specialized else 0) }}% confiance
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION COTES ALTERNATIVES COMPLÈTES -->
+        <div class="alternatives-section" style="background: var(--bg-secondary); border-radius: 10px; padding: 25px; margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h2 style="text-align: center; color: var(--text-primary); margin-bottom: 25px; font-size: 28px;">
+                💰 TOUTES LES COTES ALTERNATIVES
+            </h2>
+
+            <!-- Grille des cotes alternatives -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px;">
+
+                <!-- Cotes principales 1X2 -->
+                <div style="background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 15px 0; text-align: center;">🏆 RÉSULTAT FINAL</h4>
+                    {% for evo in odds_evolution[-1:] %}
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>{{ match.home_team.name }} gagne:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_1) if evo.odds_1 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Match nul:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_x) if evo.odds_x else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>{{ match.away_team.name }} gagne:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_2) if evo.odds_2 else 'N/A' }}</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Over/Under -->
+                <div style="background: linear-gradient(135deg, #ff6b6b, #ee5a24); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 15px 0; text-align: center;">⚽ NOMBRE DE BUTS</h4>
+                    {% for evo in odds_evolution[-1:] %}
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Plus de 1.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_over_15) if evo.odds_over_15 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Moins de 1.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_under_15) if evo.odds_under_15 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Plus de 2.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_over_25) if evo.odds_over_25 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Moins de 2.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_under_25) if evo.odds_under_25 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Plus de 3.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_over_35) if evo.odds_over_35 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Moins de 3.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_under_35) if evo.odds_under_35 else 'N/A' }}</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- BTTS -->
+                <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 15px 0; text-align: center;">🎯 BOTH TEAMS TO SCORE</h4>
+                    {% for evo in odds_evolution[-1:] %}
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Les deux marquent:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_btts_yes) if evo.odds_btts_yes else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Au moins une ne marque pas:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_btts_no) if evo.odds_btts_no else 'N/A' }}</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Double Chance -->
+                <div style="background: linear-gradient(135deg, #00b894, #00a085); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 15px 0; text-align: center;">🔄 DOUBLE CHANCE</h4>
+                    {% for evo in odds_evolution[-1:] %}
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>{{ match.home_team.name }} ou Nul:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_1x) if evo.odds_1x else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>{{ match.home_team.name }} ou {{ match.away_team.name }}:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_12) if evo.odds_12 else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Nul ou {{ match.away_team.name }}:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_x2) if evo.odds_x2 else 'N/A' }}</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Handicap -->
+                <div style="background: linear-gradient(135deg, #fd79a8, #e84393); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 15px 0; text-align: center;">⚖️ HANDICAP</h4>
+                    {% for evo in odds_evolution[-1:] %}
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>{{ match.home_team.name }} +1.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_handicap_1_plus) if evo.odds_handicap_1_plus else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>{{ match.home_team.name }} -1.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_handicap_1_minus) if evo.odds_handicap_1_minus else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>{{ match.away_team.name }} +1.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_handicap_2_plus) if evo.odds_handicap_2_plus else 'N/A' }}</strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>{{ match.away_team.name }} -1.5:</span>
+                        <strong>{{ "%.2f"|format(evo.odds_handicap_2_minus) if evo.odds_handicap_2_minus else 'N/A' }}</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <!-- Autres cotes -->
+                <div style="background: linear-gradient(135deg, #a29bfe, #6c5ce7); border-radius: 12px; padding: 18px; color: white;">
+                    <h4 style="margin: 0 0 15px 0; text-align: center;">🎲 AUTRES PARIS</h4>
+                    {% for evo in odds_evolution[-1:] %}
+                    {% if evo.other_odds %}
+                    {% for odd in evo.other_odds.split(';')[:4] %}
+                    {% if ':' in odd %}
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                        <span>{{ odd.split(':')[0].strip() }}:</span>
+                        <strong>{{ odd.split(':')[1].strip() }}</strong>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                    {% else %}
+                    <div style="text-align: center; opacity: 0.8;">Aucune autre cote disponible</div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
         </div>
 
         <div class="chart-grid">
