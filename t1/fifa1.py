@@ -42,6 +42,8 @@ class Team(db.Model):
     name = db.Column(db.String(100), nullable=False, unique=True)
     sport = db.Column(db.String(50), nullable=False)
     league = db.Column(db.String(100), nullable=False)
+    logo_url = db.Column(db.String(500))  # URL du logo de l'équipe
+    team_code = db.Column(db.String(20))  # Code de l'équipe (O1C/O2C)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relations
@@ -242,14 +244,26 @@ def init_db():
         print("Base de données initialisée avec succès!")
 
 # Fonctions utilitaires pour la base de données
-def get_or_create_team(name, sport, league):
-    """Récupère ou crée une équipe"""
+def get_or_create_team(name, sport, league, logo_url=None, team_code=None):
+    """Récupère ou crée une équipe avec logo"""
     try:
         team = Team.query.filter_by(name=name, sport=sport, league=league).first()
         if not team:
-            team = Team(name=name, sport=sport, league=league)
+            team = Team(
+                name=name,
+                sport=sport,
+                league=league,
+                logo_url=logo_url,
+                team_code=team_code
+            )
             db.session.add(team)
             db.session.commit()
+        else:
+            # Mettre à jour le logo si fourni et différent
+            if logo_url and team.logo_url != logo_url:
+                team.logo_url = logo_url
+                team.team_code = team_code
+                db.session.commit()
         return team
     except Exception as e:
         db.session.rollback()
@@ -261,7 +275,13 @@ def get_or_create_team(name, sport, league):
         unique_name = f"{name}_{sport}_{league}"
         team = Team.query.filter_by(name=unique_name).first()
         if not team:
-            team = Team(name=unique_name, sport=sport, league=league)
+            team = Team(
+                name=unique_name,
+                sport=sport,
+                league=league,
+                logo_url=logo_url,
+                team_code=team_code
+            )
             db.session.add(team)
             db.session.commit()
         return team
@@ -269,16 +289,20 @@ def get_or_create_team(name, sport, league):
 def save_match_to_db(match_data):
     """Sauvegarde un match dans la base de données"""
     try:
-        # Récupérer ou créer les équipes
+        # Récupérer ou créer les équipes avec logos
         home_team = get_or_create_team(
             match_data['team1'],
             match_data['sport'],
-            match_data['league']
+            match_data['league'],
+            match_data.get('team1_logo'),
+            match_data.get('team1_code')
         )
         away_team = get_or_create_team(
             match_data['team2'],
             match_data['sport'],
-            match_data['league']
+            match_data['league'],
+            match_data.get('team2_logo'),
+            match_data.get('team2_code')
         )
 
         # Créer un ID unique si pas d'ID API
@@ -1218,6 +1242,26 @@ def home():
                 sports_detected.add(sport)
                 leagues_detected.add(league)
 
+                # --- Logos des équipes ---
+                team1_logo = None
+                team2_logo = None
+                team1_code = match.get("O1C")
+                team2_code = match.get("O2C")
+
+                # Extraire les URLs des logos
+                if match.get("O1IMG") and isinstance(match["O1IMG"], list) and len(match["O1IMG"]) > 0:
+                    team1_logo = match["O1IMG"][0]  # Prendre le premier logo
+                    print(f"🎨 Logo équipe 1 ({team1}): {team1_logo}")
+                if match.get("O2IMG") and isinstance(match["O2IMG"], list) and len(match["O2IMG"]) > 0:
+                    team2_logo = match["O2IMG"][0]  # Prendre le premier logo
+                    print(f"🎨 Logo équipe 2 ({team2}): {team2_logo}")
+
+                # Debug: afficher la structure des logos dans l'API
+                if not team1_logo and not team2_logo:
+                    print(f"❌ Pas de logos pour {team1} vs {team2}")
+                    print(f"   O1IMG: {match.get('O1IMG')}")
+                    print(f"   O2IMG: {match.get('O2IMG')}")
+
                 # --- Score ---
                 score1 = match.get("SC", {}).get("FS", {}).get("S1")
                 score2 = match.get("SC", {}).get("FS", {}).get("S2")
@@ -1324,7 +1368,11 @@ def home():
                     "humid": humid,
                     "odds": formatted_odds,
                     "prediction": prediction,
-                    "id": match.get("I", None)
+                    "id": match.get("I", None),
+                    "team1_logo": team1_logo,
+                    "team2_logo": team2_logo,
+                    "team1_code": team1_code,
+                    "team2_code": team2_code
                 }
 
                 # Déterminer le type de prédiction pour la base de données
@@ -1827,7 +1875,24 @@ TEMPLATE = """<!DOCTYPE html>
         </tr>
         {% for m in data %}
         <tr>
-            <td>{{m.team1}}</td><td>{{m.score1}}</td><td>{{m.score2}}</td><td>{{m.team2}}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    {% if m.team1_logo %}
+                    <img src="{{ m.team1_logo }}" alt="{{ m.team1 }}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'">
+                    {% endif %}
+                    <span>{{ m.team1 }}</span>
+                </div>
+            </td>
+            <td>{{m.score1}}</td>
+            <td>{{m.score2}}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    {% if m.team2_logo %}
+                    <img src="{{ m.team2_logo }}" alt="{{ m.team2 }}" style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'">
+                    {% endif %}
+                    <span>{{ m.team2 }}</span>
+                </div>
+            </td>
             <td>{{m.sport}}</td><td>{{m.league}}</td><td>{{m.status}}</td><td>{{m.datetime}}</td>
             <td>{{m.temp}}°C</td><td>{{m.humid}}%</td><td>{{m.odds|join(" | ")}}</td><td>{{m.prediction}}</td>
             <td>{% if m.id %}<a href="/match/{{m.id}}" style="padding: 8px 16px; background: #3498db; color: white; text-decoration: none; border-radius: 4px; font-size: 14px;">📊 Analytics</a>{% else %}–{% endif %}</td>
@@ -2277,7 +2342,23 @@ MATCH_DETAILS_TEMPLATE = """<!DOCTYPE html>
         <a href="/" class="back-btn">&larr; Retour aux matchs</a>
 
         <div class="match-header">
-            <div class="match-title">📊 {{ match.home_team.name }} vs {{ match.away_team.name }}</div>
+            <div class="match-title">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 15px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        {% if match.home_team.logo_url %}
+                        <img src="{{ match.home_team.logo_url }}" alt="{{ match.home_team.name }}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'">
+                        {% endif %}
+                        <span>{{ match.home_team.name }}</span>
+                    </div>
+                    <span style="font-size: 24px;">vs</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        {% if match.away_team.logo_url %}
+                        <img src="{{ match.away_team.logo_url }}" alt="{{ match.away_team.name }}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;" onerror="this.style.display='none'">
+                        {% endif %}
+                        <span>{{ match.away_team.name }}</span>
+                    </div>
+                </div>
+            </div>
             <div style="font-size: 24px; margin: 10px 0;">{{ match.home_score }} - {{ match.away_score }}</div>
             <div>{{ match.sport }} • {{ match.league }} • {{ match.status }}</div>
         </div>
