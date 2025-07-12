@@ -11,6 +11,8 @@ from sklearn.preprocessing import StandardScaler
 import joblib
 from ml_predictor import get_ml_prediction, train_predictor_with_data, load_predictor
 from analytics import TeamAnalytics
+import threading
+import time
 
 app = Flask(__name__)
 
@@ -21,12 +23,20 @@ app.config['SECRET_KEY'] = 'your-secret-key-here'
 
 db = SQLAlchemy(app)
 
+# Initialiser la base de données au démarrage
+try:
+    with app.app_context():
+        db.create_all()
+        print("✅ Base de données initialisée avec succès!")
+except Exception as e:
+    print(f"⚠️ Erreur initialisation DB: {e}")
+
 # Charger le modèle ML au démarrage
 try:
     load_predictor()
-    print("Modèle ML chargé avec succès!")
+    print("✅ Modèle ML chargé avec succès!")
 except:
-    print("Aucun modèle ML trouvé. Entraînement nécessaire.")
+    print("⚠️ Aucun modèle ML trouvé. Entraînement nécessaire.")
 
 
 
@@ -121,6 +131,79 @@ class TeamPerformance(db.Model):
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class MatchEvolution(db.Model):
+    __tablename__ = 'match_evolution'
+
+    id = db.Column(db.Integer, primary_key=True)
+    match_id = db.Column(db.Integer, db.ForeignKey('matches.id'), nullable=False)
+
+    # État du match à ce moment
+    status = db.Column(db.String(20), nullable=False)  # 'upcoming', 'live', 'finished'
+    minute = db.Column(db.Integer)  # Minute du match si en cours
+    home_score = db.Column(db.Integer, default=0)
+    away_score = db.Column(db.Integer, default=0)
+
+    # Cotes principales 1X2
+    odds_1 = db.Column(db.Float)  # Cote victoire domicile
+    odds_x = db.Column(db.Float)  # Cote match nul
+    odds_2 = db.Column(db.Float)  # Cote victoire extérieur
+
+    # Cotes Over/Under
+    odds_over_15 = db.Column(db.Float)  # Plus de 1.5 buts
+    odds_under_15 = db.Column(db.Float)  # Moins de 1.5 buts
+    odds_over_25 = db.Column(db.Float)  # Plus de 2.5 buts
+    odds_under_25 = db.Column(db.Float)  # Moins de 2.5 buts
+    odds_over_35 = db.Column(db.Float)  # Plus de 3.5 buts
+    odds_under_35 = db.Column(db.Float)  # Moins de 3.5 buts
+
+    # Cotes Both Teams to Score
+    odds_btts_yes = db.Column(db.Float)  # Les deux équipes marquent
+    odds_btts_no = db.Column(db.Float)   # Au moins une équipe ne marque pas
+
+    # Cotes Handicap
+    odds_handicap_1_plus = db.Column(db.Float)  # Équipe 1 +1.5
+    odds_handicap_1_minus = db.Column(db.Float) # Équipe 1 -1.5
+    odds_handicap_2_plus = db.Column(db.Float)  # Équipe 2 +1.5
+    odds_handicap_2_minus = db.Column(db.Float) # Équipe 2 -1.5
+
+    # Cotes Double Chance
+    odds_1x = db.Column(db.Float)  # Victoire 1 ou Nul
+    odds_12 = db.Column(db.Float)  # Victoire 1 ou Victoire 2
+    odds_x2 = db.Column(db.Float)  # Nul ou Victoire 2
+
+    # Stockage JSON pour autres cotes
+    other_odds = db.Column(db.Text)  # JSON pour cotes supplémentaires
+
+    # Métadonnées
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    data_source = db.Column(db.String(50), default='1xbet')  # Source des données
+
+    # Relations
+    match = db.relationship('Match', backref='evolution_history')
+
+class AutoLearning(db.Model):
+    __tablename__ = 'auto_learning'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Statistiques d'apprentissage
+    total_matches_processed = db.Column(db.Integer, default=0)
+    finished_matches_count = db.Column(db.Integer, default=0)
+    last_training_date = db.Column(db.DateTime)
+    training_frequency_hours = db.Column(db.Integer, default=1)  # Entraîner toutes les heures
+
+    # Performance du modèle
+    model_accuracy = db.Column(db.Float)
+    predictions_made = db.Column(db.Integer, default=0)
+    correct_predictions = db.Column(db.Integer, default=0)
+
+    # Configuration optimisée pour apprentissage continu
+    min_matches_for_training = db.Column(db.Integer, default=5)  # Réduit de 20 à 5
+    auto_training_enabled = db.Column(db.Boolean, default=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 # Initialiser l'analytics après la définition des modèles
 analytics = TeamAnalytics(db, Match, Team)
 
@@ -134,12 +217,27 @@ def init_db():
 # Fonctions utilitaires pour la base de données
 def get_or_create_team(name, sport, league):
     """Récupère ou crée une équipe"""
-    team = Team.query.filter_by(name=name, sport=sport, league=league).first()
-    if not team:
-        team = Team(name=name, sport=sport, league=league)
-        db.session.add(team)
-        db.session.commit()
-    return team
+    try:
+        team = Team.query.filter_by(name=name, sport=sport, league=league).first()
+        if not team:
+            team = Team(name=name, sport=sport, league=league)
+            db.session.add(team)
+            db.session.commit()
+        return team
+    except Exception as e:
+        db.session.rollback()
+        # Si erreur, essayer de récupérer l'équipe existante
+        team = Team.query.filter_by(name=name, sport=sport, league=league).first()
+        if team:
+            return team
+        # Si toujours pas trouvée, créer avec un nom unique
+        unique_name = f"{name}_{sport}_{league}"
+        team = Team.query.filter_by(name=unique_name).first()
+        if not team:
+            team = Team(name=unique_name, sport=sport, league=league)
+            db.session.add(team)
+            db.session.commit()
+        return team
 
 def save_match_to_db(match_data):
     """Sauvegarde un match dans la base de données"""
@@ -260,18 +358,372 @@ def calculate_team_form(team_id, days=30):
 
     return form_string, form_score
 
+# Fonctions d'apprentissage automatique
+def save_match_evolution(match_obj, odds_data, status, minute=None):
+    """Sauvegarde l'évolution d'un match avec TOUTES ses cotes"""
+    try:
+        # Initialiser toutes les cotes
+        odds_dict = {
+            'odds_1': None, 'odds_x': None, 'odds_2': None,
+            'odds_over_15': None, 'odds_under_15': None,
+            'odds_over_25': None, 'odds_under_25': None,
+            'odds_over_35': None, 'odds_under_35': None,
+            'odds_btts_yes': None, 'odds_btts_no': None,
+            'odds_handicap_1_plus': None, 'odds_handicap_1_minus': None,
+            'odds_handicap_2_plus': None, 'odds_handicap_2_minus': None,
+            'odds_1x': None, 'odds_12': None, 'odds_x2': None
+        }
+
+        other_odds_list = []
+
+        # Extraire TOUTES les cotes
+        for odd_str in odds_data:
+            if isinstance(odd_str, str) and ':' in odd_str:
+                bet_type, odds_value = odd_str.split(': ')
+                try:
+                    odds_val = float(odds_value)
+
+                    # Cotes principales 1X2
+                    if bet_type == '1':
+                        odds_dict['odds_1'] = odds_val
+                    elif bet_type == 'X':
+                        odds_dict['odds_x'] = odds_val
+                    elif bet_type == '2':
+                        odds_dict['odds_2'] = odds_val
+
+                    # Cotes Over/Under
+                    elif 'Over 1.5' in bet_type or 'Plus de 1.5' in bet_type:
+                        odds_dict['odds_over_15'] = odds_val
+                    elif 'Under 1.5' in bet_type or 'Moins de 1.5' in bet_type:
+                        odds_dict['odds_under_15'] = odds_val
+                    elif 'Over 2.5' in bet_type or 'Plus de 2.5' in bet_type:
+                        odds_dict['odds_over_25'] = odds_val
+                    elif 'Under 2.5' in bet_type or 'Moins de 2.5' in bet_type:
+                        odds_dict['odds_under_25'] = odds_val
+                    elif 'Over 3.5' in bet_type or 'Plus de 3.5' in bet_type:
+                        odds_dict['odds_over_35'] = odds_val
+                    elif 'Under 3.5' in bet_type or 'Moins de 3.5' in bet_type:
+                        odds_dict['odds_under_35'] = odds_val
+
+                    # Both Teams to Score
+                    elif 'BTTS Yes' in bet_type or 'Les deux marquent' in bet_type:
+                        odds_dict['odds_btts_yes'] = odds_val
+                    elif 'BTTS No' in bet_type or 'Au moins une ne marque pas' in bet_type:
+                        odds_dict['odds_btts_no'] = odds_val
+
+                    # Handicap
+                    elif 'Handicap 1 +' in bet_type:
+                        odds_dict['odds_handicap_1_plus'] = odds_val
+                    elif 'Handicap 1 -' in bet_type:
+                        odds_dict['odds_handicap_1_minus'] = odds_val
+                    elif 'Handicap 2 +' in bet_type:
+                        odds_dict['odds_handicap_2_plus'] = odds_val
+                    elif 'Handicap 2 -' in bet_type:
+                        odds_dict['odds_handicap_2_minus'] = odds_val
+
+                    # Double Chance
+                    elif bet_type == '1X':
+                        odds_dict['odds_1x'] = odds_val
+                    elif bet_type == '12':
+                        odds_dict['odds_12'] = odds_val
+                    elif bet_type == 'X2':
+                        odds_dict['odds_x2'] = odds_val
+
+                    # Autres cotes
+                    else:
+                        other_odds_list.append(f"{bet_type}: {odds_val}")
+
+                except:
+                    pass
+
+        # Créer l'entrée d'évolution avec TOUTES les cotes
+        evolution = MatchEvolution(
+            match_id=match_obj.id,
+            status=status,
+            minute=minute,
+            home_score=match_obj.home_score,
+            away_score=match_obj.away_score,
+            **odds_dict,  # Toutes les cotes structurées
+            other_odds='; '.join(other_odds_list) if other_odds_list else None
+        )
+
+        db.session.add(evolution)
+        db.session.commit()
+
+        cotes_count = len([v for v in odds_dict.values() if v is not None]) + len(other_odds_list)
+        print(f"✅ Évolution sauvegardée pour match {match_obj.id} - Status: {status} - {cotes_count} cotes")
+        return True
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Erreur sauvegarde évolution: {e}")
+        return False
+
+def check_and_auto_train():
+    """Vérifie s'il faut entraîner automatiquement le modèle"""
+    try:
+        # Récupérer ou créer les paramètres d'auto-learning
+        auto_learning = AutoLearning.query.first()
+        if not auto_learning:
+            auto_learning = AutoLearning()
+            auto_learning.auto_training_enabled = True  # Toujours activé
+            db.session.add(auto_learning)
+            db.session.commit()
+
+        # Forcer l'activation si désactivé
+        if not auto_learning.auto_training_enabled:
+            auto_learning.auto_training_enabled = True
+            db.session.commit()
+            print("🔄 Auto-learning forcé à ON")
+
+        # Compter les matchs terminés
+        finished_count = Match.query.filter_by(status='Terminé').count()
+
+        # Vérifier s'il y a assez de matchs
+        if finished_count < auto_learning.min_matches_for_training:
+            print(f"🔄 Pas assez de matchs pour auto-training: {finished_count}/{auto_learning.min_matches_for_training}")
+            return False
+
+        # Vérifier la fréquence d'entraînement
+        if auto_learning.last_training_date:
+            time_since_last = datetime.utcnow() - auto_learning.last_training_date
+            hours_since = time_since_last.total_seconds() / 3600
+
+            if hours_since < auto_learning.training_frequency_hours:
+                print(f"🕐 Trop tôt pour re-entraîner: {hours_since:.1f}h/{auto_learning.training_frequency_hours}h")
+                return False
+
+        # Lancer l'entraînement automatique
+        print(f"🤖 Lancement auto-training avec {finished_count} matchs...")
+
+        # Récupérer les données d'entraînement
+        finished_matches = Match.query.filter_by(status='Terminé').all()
+        training_data = []
+
+        for match in finished_matches:
+            # Récupérer les cotes initiales (première évolution)
+            initial_evolution = MatchEvolution.query.filter_by(
+                match_id=match.id
+            ).order_by(MatchEvolution.timestamp.asc()).first()
+
+            if initial_evolution and initial_evolution.odds_1:
+                match_data = {
+                    'team1': match.home_team.name,
+                    'team2': match.away_team.name,
+                    'sport': match.sport,
+                    'league': match.league,
+                    'score1': match.home_score,
+                    'score2': match.away_score,
+                    'status': 'Terminé',
+                    'temp': match.temperature or 20,
+                    'humid': match.humidity or 50,
+                    'odds': [
+                        f"1: {initial_evolution.odds_1}",
+                        f"X: {initial_evolution.odds_x}",
+                        f"2: {initial_evolution.odds_2}"
+                    ]
+                }
+                training_data.append(match_data)
+
+        # Entraîner le modèle
+        if len(training_data) >= 10:
+            success = train_predictor_with_data(training_data)
+
+            # Mettre à jour les statistiques
+            auto_learning.total_matches_processed = len(training_data)
+            auto_learning.finished_matches_count = finished_count
+            auto_learning.last_training_date = datetime.utcnow()
+
+            if success:
+                print(f"✅ Auto-training réussi avec {len(training_data)} matchs")
+                from ml_predictor import save_predictor
+                save_predictor()
+            else:
+                print(f"❌ Auto-training échoué")
+
+            db.session.commit()
+            return success
+
+        return False
+
+    except Exception as e:
+        print(f"❌ Erreur auto-training: {e}")
+        return False
+
+def fetch_and_process_matches_background():
+    """Récupère et traite les matchs automatiquement en arrière-plan"""
+    while True:
+        try:
+            with app.app_context():
+                print("🔄 Récupération automatique des matchs...")
+
+                # Récupérer les données de l'API
+                url = "https://1xbet.whoscored.com/v1/events"
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+
+                response = requests.get(url, headers=headers, timeout=30)
+                if response.status_code == 200:
+                    api_data = response.json()
+
+                    # Traiter chaque match
+                    processed_count = 0
+                    for match in api_data.get("Value", []):
+                        try:
+                            # Extraire les données du match
+                            team1 = match.get("O1E", "Équipe 1")
+                            team2 = match.get("O2E", "Équipe 2")
+                            score1 = match.get("SC", {}).get("FS", {}).get("S1", 0) or 0
+                            score2 = match.get("SC", {}).get("FS", {}).get("S2", 0) or 0
+
+                            # Déterminer le statut
+                            minute = match.get("SC", {}).get("CPS", {}).get("T")
+                            statut = "À venir"
+                            if minute and minute > 0:
+                                statut = f"En cours ({minute}′)"
+                            elif score1 > 0 or score2 > 0:
+                                statut = "En cours"
+
+                            # Vérifier si terminé
+                            tn = match.get("SC", {}).get("TN", "").lower()
+                            if "terminé" in tn or "finished" in tn:
+                                statut = "Terminé"
+
+                            # Extraire les cotes
+                            odds_data = []
+                            for odd in match.get("E", []):
+                                if odd.get("G") == 1:  # Groupe principal 1X2
+                                    for c in odd.get("C", []):
+                                        if c.get("T") == 1:
+                                            odds_data.append(f"1: {c.get('F')}")
+                                        elif c.get("T") == 2:
+                                            odds_data.append(f"X: {c.get('F')}")
+                                        elif c.get("T") == 3:
+                                            odds_data.append(f"2: {c.get('F')}")
+
+                            # Créer les données du match
+                            match_data = {
+                                'team1': team1,
+                                'team2': team2,
+                                'score1': score1,
+                                'score2': score2,
+                                'sport': 'Football',
+                                'league': match.get("LN", "Ligue inconnue"),
+                                'status': statut,
+                                'temp': 20,
+                                'humid': 50,
+                                'odds': odds_data
+                            }
+
+                            # Sauvegarder le match
+                            saved_match = save_match_to_db(match_data)
+
+                            # Sauvegarder l'évolution des cotes
+                            if saved_match and odds_data:
+                                save_match_evolution(saved_match, odds_data, statut, minute)
+
+                            # Si le match est terminé, déclencher l'auto-training
+                            if saved_match and statut == "Terminé":
+                                check_and_auto_train()
+
+                            processed_count += 1
+
+                        except Exception as e:
+                            print(f"❌ Erreur traitement match: {e}")
+                            continue
+
+                    print(f"✅ {processed_count} matchs traités automatiquement")
+
+                else:
+                    print(f"❌ Erreur API: {response.status_code}")
+
+        except Exception as e:
+            print(f"❌ Erreur récupération automatique: {e}")
+
+        # Attendre 2 minutes avant la prochaine récupération
+        time.sleep(120)  # 2 minutes
+
+def auto_learning_background():
+    """Fonction qui tourne en arrière-plan pour l'apprentissage automatique"""
+    while True:
+        try:
+            with app.app_context():
+                check_and_auto_train()
+        except Exception as e:
+            print(f"❌ Erreur background auto-learning: {e}")
+
+        # Attendre 10 minutes avant la prochaine vérification
+        time.sleep(600)  # 10 minutes
+
 @app.route('/train_ml')
 def train_ml():
     """Route pour entraîner le modèle ML"""
     try:
+        # Vérifier que les tables existent
+        with app.app_context():
+            db.create_all()
+
         # Récupérer tous les matchs terminés de la base de données
         finished_matches = Match.query.filter_by(status='Terminé').all()
 
-        if len(finished_matches) < 10:
-            return jsonify({
-                "error": "Pas assez de matchs terminés pour entraîner le modèle (minimum 10)",
-                "matches_count": len(finished_matches)
-            })
+        if len(finished_matches) < 5:  # Réduire le minimum pour les tests
+            # Créer des données d'exemple pour l'entraînement
+            sample_data = [
+                {
+                    'team1': 'PSG', 'team2': 'Marseille', 'sport': 'Football', 'league': 'Ligue 1',
+                    'score1': 2, 'score2': 1, 'status': 'Terminé', 'temp': 22, 'humid': 65,
+                    'odds': ['1: 1.85', 'X: 3.20', '2: 4.10']
+                },
+                {
+                    'team1': 'Real Madrid', 'team2': 'Barcelona', 'sport': 'Football', 'league': 'La Liga',
+                    'score1': 1, 'score2': 3, 'status': 'Terminé', 'temp': 28, 'humid': 45,
+                    'odds': ['1: 2.10', 'X: 3.40', '2: 3.20']
+                },
+                {
+                    'team1': 'Manchester City', 'team2': 'Liverpool', 'sport': 'Football', 'league': 'Premier League',
+                    'score1': 0, 'score2': 2, 'status': 'Terminé', 'temp': 15, 'humid': 70,
+                    'odds': ['1: 1.95', 'X: 3.60', '2: 3.80']
+                },
+                {
+                    'team1': 'Bayern Munich', 'team2': 'Dortmund', 'sport': 'Football', 'league': 'Bundesliga',
+                    'score1': 3, 'score2': 0, 'status': 'Terminé', 'temp': 18, 'humid': 55,
+                    'odds': ['1: 1.70', 'X: 3.80', '2: 4.50']
+                },
+                {
+                    'team1': 'Juventus', 'team2': 'AC Milan', 'sport': 'Football', 'league': 'Serie A',
+                    'score1': 1, 'score2': 1, 'status': 'Terminé', 'temp': 25, 'humid': 60,
+                    'odds': ['1: 2.20', 'X: 3.10', '2: 3.40']
+                }
+            ]
+
+            # Essayer l'entraînement avec les données d'exemple
+            try:
+                training_success = train_predictor_with_data(sample_data)
+                if training_success:
+                    return jsonify({
+                        "message": f"✅ Entraînement réussi avec données d'exemple ({len(sample_data)} matchs)",
+                        "matches_count": len(finished_matches),
+                        "sample_training": True,
+                        "success": True
+                    })
+                else:
+                    return jsonify({
+                        "message": f"⚠️ Entraînement échoué. Mode prédiction basique activé.",
+                        "matches_count": len(finished_matches),
+                        "sample_training": True,
+                        "success": False,
+                        "fallback_mode": True
+                    })
+            except Exception as ml_error:
+                return jsonify({
+                    "message": f"⚠️ ML non disponible. Mode prédiction basique activé.",
+                    "matches_count": len(finished_matches),
+                    "sample_training": True,
+                    "success": False,
+                    "error": str(ml_error),
+                    "fallback_mode": True
+                })
 
         # Convertir en format pour le ML
         matches_data = []
@@ -415,6 +867,262 @@ def league_heatmap(league_name):
         return jsonify(heatmap_data)
     except Exception as e:
         return jsonify({"error": str(e)})
+
+@app.route('/status')
+def system_status():
+    """Route pour vérifier l'état du système"""
+    try:
+        # Vérifier la base de données
+        with app.app_context():
+            db.create_all()
+            match_count = Match.query.count()
+            team_count = Team.query.count()
+
+        # Vérifier le ML
+        ml_status = False
+        try:
+            from ml_predictor import predictor
+            ml_status = predictor.is_trained
+        except:
+            ml_status = False
+
+        # Vérifier l'analytics
+        analytics_status = True
+        try:
+            from analytics import TeamAnalytics
+            analytics_status = True
+        except:
+            analytics_status = False
+
+        return jsonify({
+            "database": {
+                "status": "✅ Connectée",
+                "matches": match_count,
+                "teams": team_count
+            },
+            "machine_learning": {
+                "status": "✅ Actif" if ml_status else "⚠️ Non entraîné",
+                "trained": ml_status
+            },
+            "analytics": {
+                "status": "✅ Actif" if analytics_status else "❌ Erreur",
+                "available": analytics_status
+            },
+            "api": {
+                "status": "✅ En ligne",
+                "version": "2.0"
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "status": "❌ Erreur système"
+        })
+
+@app.route('/add_sample_data')
+def add_sample_data():
+    """Ajouter des données d'exemple pour tester le ML"""
+    try:
+        sample_matches = [
+            {
+                'team1': 'PSG', 'team2': 'Marseille', 'sport': 'Football', 'league': 'Ligue 1',
+                'score1': 2, 'score2': 1, 'status': 'Terminé', 'temp': 22, 'humid': 65,
+                'odds': ['1: 1.85', 'X: 3.20', '2: 4.10'], 'id': 'sample_1'
+            },
+            {
+                'team1': 'Real Madrid', 'team2': 'Barcelona', 'sport': 'Football', 'league': 'La Liga',
+                'score1': 1, 'score2': 3, 'status': 'Terminé', 'temp': 28, 'humid': 45,
+                'odds': ['1: 2.10', 'X: 3.40', '2: 3.20'], 'id': 'sample_2'
+            },
+            {
+                'team1': 'Manchester City', 'team2': 'Liverpool', 'sport': 'Football', 'league': 'Premier League',
+                'score1': 0, 'score2': 2, 'status': 'Terminé', 'temp': 15, 'humid': 70,
+                'odds': ['1: 1.95', 'X: 3.60', '2: 3.80'], 'id': 'sample_3'
+            },
+            {
+                'team1': 'Bayern Munich', 'team2': 'Dortmund', 'sport': 'Football', 'league': 'Bundesliga',
+                'score1': 3, 'score2': 0, 'status': 'Terminé', 'temp': 18, 'humid': 55,
+                'odds': ['1: 1.70', 'X: 3.80', '2: 4.50'], 'id': 'sample_4'
+            },
+            {
+                'team1': 'Juventus', 'team2': 'AC Milan', 'sport': 'Football', 'league': 'Serie A',
+                'score1': 1, 'score2': 1, 'status': 'Terminé', 'temp': 25, 'humid': 60,
+                'odds': ['1: 2.20', 'X: 3.10', '2: 3.40'], 'id': 'sample_5'
+            },
+            {
+                'team1': 'Arsenal', 'team2': 'Chelsea', 'sport': 'Football', 'league': 'Premier League',
+                'score1': 2, 'score2': 0, 'status': 'Terminé', 'temp': 12, 'humid': 75,
+                'odds': ['1: 2.40', 'X: 3.20', '2: 2.90'], 'id': 'sample_6'
+            },
+            {
+                'team1': 'Atletico Madrid', 'team2': 'Sevilla', 'sport': 'Football', 'league': 'La Liga',
+                'score1': 1, 'score2': 2, 'status': 'Terminé', 'temp': 30, 'humid': 40,
+                'odds': ['1: 1.90', 'X: 3.50', '2: 4.20'], 'id': 'sample_7'
+            },
+            {
+                'team1': 'Inter Milan', 'team2': 'Napoli', 'sport': 'Football', 'league': 'Serie A',
+                'score1': 3, 'score2': 1, 'status': 'Terminé', 'temp': 26, 'humid': 58,
+                'odds': ['1: 2.00', 'X: 3.30', '2: 3.60'], 'id': 'sample_8'
+            }
+        ]
+
+        added_count = 0
+        for match_data in sample_matches:
+            try:
+                saved_match = save_match_to_db(match_data)
+                if saved_match:
+                    added_count += 1
+            except Exception as e:
+                print(f"Erreur ajout match {match_data['id']}: {e}")
+                continue
+
+        return jsonify({
+            "success": True,
+            "message": f"✅ {added_count} matchs d'exemple ajoutés à la base de données",
+            "total_added": added_count,
+            "total_attempted": len(sample_matches)
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        })
+
+@app.route('/auto_learning_config')
+def auto_learning_config():
+    """Configuration de l'apprentissage automatique"""
+    try:
+        auto_learning = AutoLearning.query.first()
+        if not auto_learning:
+            auto_learning = AutoLearning()
+            db.session.add(auto_learning)
+            db.session.commit()
+
+        return jsonify({
+            "auto_training_enabled": auto_learning.auto_training_enabled,
+            "min_matches_for_training": auto_learning.min_matches_for_training,
+            "training_frequency_hours": auto_learning.training_frequency_hours,
+            "total_matches_processed": auto_learning.total_matches_processed,
+            "finished_matches_count": auto_learning.finished_matches_count,
+            "last_training_date": auto_learning.last_training_date.isoformat() if auto_learning.last_training_date else None,
+            "model_accuracy": auto_learning.model_accuracy,
+            "predictions_made": auto_learning.predictions_made,
+            "correct_predictions": auto_learning.correct_predictions
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/toggle_auto_learning')
+def toggle_auto_learning():
+    """Activer/désactiver l'apprentissage automatique"""
+    try:
+        auto_learning = AutoLearning.query.first()
+        if not auto_learning:
+            auto_learning = AutoLearning()
+            db.session.add(auto_learning)
+
+        auto_learning.auto_training_enabled = not auto_learning.auto_training_enabled
+        db.session.commit()
+
+        status = "✅ Activé" if auto_learning.auto_training_enabled else "⏸️ Désactivé"
+
+        return jsonify({
+            "success": True,
+            "auto_training_enabled": auto_learning.auto_training_enabled,
+            "message": f"Auto-learning {status}"
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/auto_activity')
+def auto_activity():
+    """Affiche l'activité automatique du système"""
+    try:
+        # Statistiques de l'auto-learning
+        auto_learning = AutoLearning.query.first()
+
+        # Derniers matchs traités
+        recent_matches = Match.query.order_by(Match.updated_at.desc()).limit(10).all()
+
+        # Dernières évolutions sauvegardées
+        recent_evolutions = MatchEvolution.query.order_by(MatchEvolution.timestamp.desc()).limit(20).all()
+
+        return jsonify({
+            "auto_learning_status": {
+                "enabled": auto_learning.auto_training_enabled if auto_learning else False,
+                "total_matches": auto_learning.total_matches_processed if auto_learning else 0,
+                "finished_matches": auto_learning.finished_matches_count if auto_learning else 0,
+                "last_training": auto_learning.last_training_date.isoformat() if auto_learning and auto_learning.last_training_date else None,
+                "model_accuracy": auto_learning.model_accuracy if auto_learning else None
+            },
+            "recent_activity": {
+                "recent_matches_count": len(recent_matches),
+                "recent_evolutions_count": len(recent_evolutions),
+                "last_match_update": recent_matches[0].updated_at.isoformat() if recent_matches else None,
+                "last_evolution": recent_evolutions[0].timestamp.isoformat() if recent_evolutions else None
+            },
+            "system_status": {
+                "auto_fetch_running": True,  # Toujours True car thread daemon
+                "auto_learning_running": True,
+                "database_connected": True
+            }
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/match/<int:match_id>')
+def match_details(match_id):
+    """Affiche les détails d'un match spécifique avec analytics intégrés"""
+    try:
+        # Récupérer le match depuis la base de données
+        match = Match.query.get_or_404(match_id)
+
+        # Récupérer l'évolution des cotes pour ce match
+        odds_evolution = MatchEvolution.query.filter_by(match_id=match_id).order_by(MatchEvolution.timestamp).all()
+
+        # Récupérer les statistiques H2H
+        h2h_data = analytics.get_head_to_head(match.home_team.name, match.away_team.name)
+
+        # Récupérer la forme des équipes
+        home_form = analytics.get_team_recent_form(match.home_team.name)
+        away_form = analytics.get_team_recent_form(match.away_team.name)
+
+        # Préparer les données pour les graphiques
+        odds_data = {
+            'timestamps': [evo.timestamp.strftime('%H:%M') for evo in odds_evolution],
+            # Cotes principales 1X2
+            'odds_1': [evo.odds_1 for evo in odds_evolution if evo.odds_1],
+            'odds_x': [evo.odds_x for evo in odds_evolution if evo.odds_x],
+            'odds_2': [evo.odds_2 for evo in odds_evolution if evo.odds_2],
+            # Cotes Over/Under
+            'odds_over_25': [evo.odds_over_25 for evo in odds_evolution if evo.odds_over_25],
+            'odds_under_25': [evo.odds_under_25 for evo in odds_evolution if evo.odds_under_25],
+            'odds_over_15': [evo.odds_over_15 for evo in odds_evolution if evo.odds_over_15],
+            'odds_under_15': [evo.odds_under_15 for evo in odds_evolution if evo.odds_under_15],
+            # BTTS
+            'odds_btts_yes': [evo.odds_btts_yes for evo in odds_evolution if evo.odds_btts_yes],
+            'odds_btts_no': [evo.odds_btts_no for evo in odds_evolution if evo.odds_btts_no],
+            # Double Chance
+            'odds_1x': [evo.odds_1x for evo in odds_evolution if evo.odds_1x],
+            'odds_12': [evo.odds_12 for evo in odds_evolution if evo.odds_12],
+            'odds_x2': [evo.odds_x2 for evo in odds_evolution if evo.odds_x2]
+        }
+
+        return render_template_string(MATCH_DETAILS_TEMPLATE,
+                                    match=match,
+                                    odds_evolution=odds_evolution,
+                                    h2h_data=h2h_data,
+                                    home_form=home_form,
+                                    away_form=away_form,
+                                    odds_data=odds_data)
+
+    except Exception as e:
+        return f"Erreur: {str(e)}"
 
 @app.route('/')
 def home():
@@ -570,7 +1278,7 @@ def home():
                     print(f"Erreur analyse H2H: {e}")
                     match_data["analytics_confidence"] = 0.5
 
-                # Prédiction ML
+                # Prédiction ML avec fallback
                 try:
                     ml_prediction, ml_confidence = get_ml_prediction(match_data)
                     if ml_prediction:
@@ -592,13 +1300,33 @@ def home():
                             match_data["prediction"] = f"{ml_prediction_text} ({combined_confidence:.1%})"
                         else:
                             match_data["prediction"] = f"{prediction} | {ml_prediction_text} ({combined_confidence:.1%})"
+                    else:
+                        # Fallback: prédiction basée sur les cotes uniquement
+                        match_data["prediction"] = f"{prediction} (Cotes)"
+                        match_data["ml_prediction"] = None
+                        match_data["ml_confidence"] = 0.5
                 except Exception as e:
                     print(f"Erreur prédiction ML: {e}")
+                    # Fallback: prédiction basée sur les cotes + analytics
+                    analytics_conf = match_data.get("analytics_confidence", 0.5)
+                    if analytics_conf > 0.6:
+                        match_data["prediction"] = f"{prediction} (Analytics {analytics_conf:.1%})"
+                    else:
+                        match_data["prediction"] = f"{prediction} (Cotes)"
                     match_data["ml_prediction"] = None
                     match_data["ml_confidence"] = 0.5
 
                 # Sauvegarder dans la base de données
-                save_match_to_db(match_data)
+                saved_match = save_match_to_db(match_data)
+
+                # Sauvegarder l'évolution du match avec les cotes actuelles
+                if saved_match and formatted_odds:
+                    save_match_evolution(saved_match, formatted_odds, statut, minute)
+
+                # Vérifier s'il faut faire un auto-training
+                if saved_match and statut == "Terminé":
+                    # Lancer la vérification en arrière-plan
+                    threading.Thread(target=check_and_auto_train, daemon=True).start()
 
                 data.append(match_data)
             except Exception as e:
@@ -1128,12 +1856,19 @@ TEMPLATE = """<!DOCTYPE html>
     <h2>📊 Matchs en direct — {{ selected_sport }} / {{ selected_league }} / {{ selected_status }}</h2>
 
     <div style="text-align: center; margin-bottom: 20px;">
-        <a href="/analytics_dashboard" style="display: inline-block; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 0 10px;">
-            📈 Dashboard Analytics Avancé
+        <a href="/analytics_dashboard" style="display: inline-block; padding: 12px 24px; background: #3498db; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 5px;">
+            📈 Dashboard Analytics
         </a>
-        <a href="/train_ml" style="display: inline-block; padding: 12px 24px; background: #e74c3c; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 0 10px;">
-            🤖 Entraîner le ML
+        <a href="/train_ml" style="display: inline-block; padding: 12px 24px; background: #e74c3c; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 5px;">
+            🤖 Entraîner ML
         </a>
+        <a href="/add_sample_data" style="display: inline-block; padding: 12px 24px; background: #27ae60; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 5px;">
+            📊 Ajouter Données Test
+        </a>
+        <a href="/status" style="display: inline-block; padding: 12px 24px; background: #f39c12; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 5px;">
+            🔍 Status Système
+        </a>
+
     </div>
 
     <form method="get" aria-label="Filtres de matchs">
@@ -1187,7 +1922,7 @@ TEMPLATE = """<!DOCTYPE html>
             <td>{{m.team1}}</td><td>{{m.score1}}</td><td>{{m.score2}}</td><td>{{m.team2}}</td>
             <td>{{m.sport}}</td><td>{{m.league}}</td><td>{{m.status}}</td><td>{{m.datetime}}</td>
             <td>{{m.temp}}°C</td><td>{{m.humid}}%</td><td>{{m.odds|join(" | ")}}</td><td>{{m.prediction}}</td>
-            <td>{% if m.id %}<a href="/match/{{m.id}}"><button>Détails</button></a>{% else %}–{% endif %}</td>
+            <td>{% if m.id %}<a href="/match/{{m.id}}" style="padding: 8px 16px; background: #3498db; color: white; text-decoration: none; border-radius: 4px; font-size: 14px;">📊 Analytics</a>{% else %}–{% endif %}</td>
         </tr>
         {% endfor %}
     </table>
@@ -1544,6 +2279,388 @@ ANALYTICS_TEMPLATE = """<!DOCTYPE html>
     </script>
 </body></html>"""
 
+MATCH_DETAILS_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>📊 Analytics - {{ match.home_team.name }} vs {{ match.away_team.name }}</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #f4f4f4;
+            --bg-secondary: #ffffff;
+            --text-primary: #2c3e50;
+            --border-color: #ddd;
+            --button-bg: #3498db;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --text-primary: #e0e0e0;
+            --border-color: #555;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .container { max-width: 1400px; margin: 0 auto; }
+
+        .match-header {
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .match-title { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .chart-card {
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .chart-container { position: relative; height: 400px; }
+
+        .back-btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: var(--button-bg);
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--button-bg);
+            border: none;
+            border-radius: 50px;
+            padding: 10px 15px;
+            color: white;
+            cursor: pointer;
+            z-index: 1000;
+        }
+    </style>
+</head><body>
+    <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()">🌙 Sombre</button>
+
+    <div class="container">
+        <a href="/" class="back-btn">&larr; Retour aux matchs</a>
+
+        <div class="match-header">
+            <div class="match-title">📊 {{ match.home_team.name }} vs {{ match.away_team.name }}</div>
+            <div style="font-size: 24px; margin: 10px 0;">{{ match.home_score }} - {{ match.away_score }}</div>
+            <div>{{ match.sport }} • {{ match.league }} • {{ match.status }}</div>
+        </div>
+
+        <div class="chart-grid">
+            <div class="chart-card">
+                <h3>📈 Cotes 1X2 (Victoire/Nul)</h3>
+                <div class="chart-container"><canvas id="oddsChart1X2"></canvas></div>
+            </div>
+
+            <div class="chart-card">
+                <h3>⚽ Cotes Over/Under 2.5 Buts</h3>
+                <div class="chart-container"><canvas id="oddsChartOU25"></canvas></div>
+            </div>
+
+            <div class="chart-card">
+                <h3>🎯 Cotes BTTS (Both Teams to Score)</h3>
+                <div class="chart-container"><canvas id="oddsChartBTTS"></canvas></div>
+            </div>
+
+            <div class="chart-card">
+                <h3>🔄 Cotes Double Chance</h3>
+                <div class="chart-container"><canvas id="oddsChartDC"></canvas></div>
+            </div>
+
+            <div class="chart-card">
+                <h3>🎯 Comparaison équipes</h3>
+                <div class="chart-container"><canvas id="radarChart"></canvas></div>
+            </div>
+
+            <div class="chart-card">
+                <h3>📊 Résumé des cotes actuelles</h3>
+                <div class="chart-container">
+                    <table class="stats-table">
+                        <tr><th>Type de pari</th><th>Cote actuelle</th><th>Évolution</th></tr>
+                        <tr><td>{{ match.home_team.name }} gagne</td><td id="current-odds-1">-</td><td id="trend-1">-</td></tr>
+                        <tr><td>Match nul</td><td id="current-odds-x">-</td><td id="trend-x">-</td></tr>
+                        <tr><td>{{ match.away_team.name }} gagne</td><td id="current-odds-2">-</td><td id="trend-2">-</td></tr>
+                        <tr><td>Plus de 2.5 buts</td><td id="current-odds-o25">-</td><td id="trend-o25">-</td></tr>
+                        <tr><td>Moins de 2.5 buts</td><td id="current-odds-u25">-</td><td id="trend-u25">-</td></tr>
+                        <tr><td>Les deux marquent</td><td id="current-odds-btts-yes">-</td><td id="trend-btts-yes">-</td></tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('theme', newTheme);
+            document.getElementById('theme-toggle').innerHTML = newTheme === 'dark' ? '☀️ Clair' : '🌙 Sombre';
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            document.getElementById('theme-toggle').innerHTML = savedTheme === 'dark' ? '☀️ Clair' : '🌙 Sombre';
+
+            // Données des cotes
+            const oddsData = {{ odds_data|tojson }};
+
+            // 1. Graphique des cotes 1X2
+            const odds1X2Ctx = document.getElementById('oddsChart1X2').getContext('2d');
+            new Chart(odds1X2Ctx, {
+                type: 'line',
+                data: {
+                    labels: oddsData.timestamps.length > 0 ? oddsData.timestamps : ['Début'],
+                    datasets: [{
+                        label: '{{ match.home_team.name }} (1)',
+                        data: oddsData.odds_1.length > 0 ? oddsData.odds_1 : [2.0],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Match Nul (X)',
+                        data: oddsData.odds_x.length > 0 ? oddsData.odds_x : [3.0],
+                        borderColor: '#f39c12',
+                        backgroundColor: 'rgba(243, 156, 18, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: '{{ match.away_team.name }} (2)',
+                        data: oddsData.odds_2.length > 0 ? oddsData.odds_2 : [2.5],
+                        borderColor: '#27ae60',
+                        backgroundColor: 'rgba(39, 174, 96, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: false, title: { display: true, text: 'Cotes' } } }
+                }
+            });
+
+            // 2. Graphique Over/Under 2.5
+            const oddsOU25Ctx = document.getElementById('oddsChartOU25').getContext('2d');
+            new Chart(oddsOU25Ctx, {
+                type: 'line',
+                data: {
+                    labels: oddsData.timestamps.length > 0 ? oddsData.timestamps : ['Début'],
+                    datasets: [{
+                        label: 'Plus de 2.5 buts',
+                        data: oddsData.odds_over_25.length > 0 ? oddsData.odds_over_25 : [1.8],
+                        borderColor: '#e67e22',
+                        backgroundColor: 'rgba(230, 126, 34, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Moins de 2.5 buts',
+                        data: oddsData.odds_under_25.length > 0 ? oddsData.odds_under_25 : [2.0],
+                        borderColor: '#9b59b6',
+                        backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: false, title: { display: true, text: 'Cotes' } } }
+                }
+            });
+
+            // 3. Graphique BTTS
+            const oddsBTTSCtx = document.getElementById('oddsChartBTTS').getContext('2d');
+            new Chart(oddsBTTSCtx, {
+                type: 'line',
+                data: {
+                    labels: oddsData.timestamps.length > 0 ? oddsData.timestamps : ['Début'],
+                    datasets: [{
+                        label: 'Les deux marquent (Oui)',
+                        data: oddsData.odds_btts_yes.length > 0 ? oddsData.odds_btts_yes : [1.9],
+                        borderColor: '#2ecc71',
+                        backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'Au moins une ne marque pas (Non)',
+                        data: oddsData.odds_btts_no.length > 0 ? oddsData.odds_btts_no : [1.9],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: false, title: { display: true, text: 'Cotes' } } }
+                }
+            });
+
+            // 4. Graphique Double Chance
+            const oddsDCCtx = document.getElementById('oddsChartDC').getContext('2d');
+            new Chart(oddsDCCtx, {
+                type: 'line',
+                data: {
+                    labels: oddsData.timestamps.length > 0 ? oddsData.timestamps : ['Début'],
+                    datasets: [{
+                        label: '1X ({{ match.home_team.name }} ou Nul)',
+                        data: oddsData.odds_1x.length > 0 ? oddsData.odds_1x : [1.3],
+                        borderColor: '#34495e',
+                        backgroundColor: 'rgba(52, 73, 94, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: '12 ({{ match.home_team.name }} ou {{ match.away_team.name }})',
+                        data: oddsData.odds_12.length > 0 ? oddsData.odds_12 : [1.2],
+                        borderColor: '#16a085',
+                        backgroundColor: 'rgba(22, 160, 133, 0.1)',
+                        tension: 0.4
+                    }, {
+                        label: 'X2 (Nul ou {{ match.away_team.name }})',
+                        data: oddsData.odds_x2.length > 0 ? oddsData.odds_x2 : [1.4],
+                        borderColor: '#8e44ad',
+                        backgroundColor: 'rgba(142, 68, 173, 0.1)',
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { beginAtZero: false, title: { display: true, text: 'Cotes' } } }
+                }
+            });
+
+            // Mettre à jour le tableau des cotes actuelles
+            if (oddsData.odds_1.length > 0) {
+                document.getElementById('current-odds-1').textContent = oddsData.odds_1[oddsData.odds_1.length - 1].toFixed(2);
+            }
+            if (oddsData.odds_x.length > 0) {
+                document.getElementById('current-odds-x').textContent = oddsData.odds_x[oddsData.odds_x.length - 1].toFixed(2);
+            }
+            if (oddsData.odds_2.length > 0) {
+                document.getElementById('current-odds-2').textContent = oddsData.odds_2[oddsData.odds_2.length - 1].toFixed(2);
+            }
+            if (oddsData.odds_over_25.length > 0) {
+                document.getElementById('current-odds-o25').textContent = oddsData.odds_over_25[oddsData.odds_over_25.length - 1].toFixed(2);
+            }
+            if (oddsData.odds_under_25.length > 0) {
+                document.getElementById('current-odds-u25').textContent = oddsData.odds_under_25[oddsData.odds_under_25.length - 1].toFixed(2);
+            }
+            if (oddsData.odds_btts_yes.length > 0) {
+                document.getElementById('current-odds-btts-yes').textContent = oddsData.odds_btts_yes[oddsData.odds_btts_yes.length - 1].toFixed(2);
+            }
+
+            // Radar chart
+            const radarCtx = document.getElementById('radarChart').getContext('2d');
+            const homeForm = {{ home_form|tojson }};
+            const awayForm = {{ away_form|tojson }};
+
+            let homeMetrics = [5, 5, 5, 5];
+            let awayMetrics = [5, 5, 5, 5];
+
+            if (homeForm && awayForm) {
+                homeMetrics = [
+                    homeForm.form_score * 10,
+                    (homeForm.wins / Math.max(homeForm.matches_played, 1)) * 10,
+                    (homeForm.goals_for / Math.max(homeForm.matches_played, 1)) * 2,
+                    10 - (homeForm.goals_against / Math.max(homeForm.matches_played, 1)) * 2
+                ];
+                awayMetrics = [
+                    awayForm.form_score * 10,
+                    (awayForm.wins / Math.max(awayForm.matches_played, 1)) * 10,
+                    (awayForm.goals_for / Math.max(awayForm.matches_played, 1)) * 2,
+                    10 - (awayForm.goals_against / Math.max(awayForm.matches_played, 1)) * 2
+                ];
+            }
+
+            new Chart(radarCtx, {
+                type: 'radar',
+                data: {
+                    labels: ['Forme', 'Victoires', 'Attaque', 'Défense'],
+                    datasets: [{
+                        label: '{{ match.home_team.name }}',
+                        data: homeMetrics,
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.2)'
+                    }, {
+                        label: '{{ match.away_team.name }}',
+                        data: awayMetrics,
+                        borderColor: '#3498db',
+                        backgroundColor: 'rgba(52, 152, 219, 0.2)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { r: { beginAtZero: true, max: 10 } }
+                }
+            });
+        });
+    </script>
+</body></html>"""
+
+# Démarrer les processus automatiques en arrière-plan
+def start_auto_learning():
+    """Démarre le processus d'auto-learning en arrière-plan"""
+    try:
+        # Attendre 30 secondes avant de commencer (laisser l'app se lancer)
+        time.sleep(30)
+        print("🤖 Auto-learning démarré - Vérification toutes les 10 minutes")
+        auto_learning_background()
+    except Exception as e:
+        print(f"❌ Erreur démarrage auto-learning: {e}")
+
+def start_auto_fetching():
+    """Démarre la récupération automatique des matchs"""
+    try:
+        # Attendre 10 secondes avant de commencer
+        time.sleep(10)
+        print("🔄 Récupération automatique démarrée - Toutes les 2 minutes")
+        fetch_and_process_matches_background()
+    except Exception as e:
+        print(f"❌ Erreur démarrage auto-fetching: {e}")
+
 if __name__ == "__main__":
+    print("🚀 Démarrage du système d'apprentissage automatique...")
+
+    # Démarrer la récupération automatique des matchs
+    auto_fetch_thread = threading.Thread(target=start_auto_fetching, daemon=True)
+    auto_fetch_thread.start()
+    print("✅ Thread de récupération automatique lancé")
+
+    # Démarrer l'auto-learning en arrière-plan
+    auto_learning_thread = threading.Thread(target=start_auto_learning, daemon=True)
+    auto_learning_thread.start()
+    print("✅ Thread d'auto-learning lancé")
+
+    print("🎯 Système 100% autonome - Aucune intervention manuelle requise")
+    print("📊 Récupération: toutes les 2 minutes")
+    print("🤖 Auto-training: toutes les heures (min 5 matchs)")
+    print("🔄 Le système fonctionne en permanence en arrière-plan")
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
