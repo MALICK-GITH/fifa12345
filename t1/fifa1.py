@@ -1770,6 +1770,45 @@ def debug_odds():
     except Exception as e:
         return jsonify({"error": str(e)})
 
+@app.route('/performance_test')
+def performance_test():
+    """Route de test de performance"""
+    import time
+    start = time.time()
+
+    try:
+        # Test API
+        api_start = time.time()
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=5&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        response = requests.get(api_url, timeout=5)
+        api_time = time.time() - api_start
+
+        # Test DB
+        db_start = time.time()
+        match_count = Match.query.count()
+        team_count = Team.query.count()
+        db_time = time.time() - db_start
+
+        total_time = time.time() - start
+
+        return jsonify({
+            "performance": {
+                "total_time": f"{total_time:.2f}s",
+                "api_time": f"{api_time:.2f}s",
+                "db_time": f"{db_time:.3f}s",
+                "api_matches": len(response.json().get("Value", [])),
+                "db_matches": match_count,
+                "db_teams": team_count
+            },
+            "recommendations": [
+                "✅ API rapide" if api_time < 2 else "⚠️ API lente",
+                "✅ DB rapide" if db_time < 0.1 else "⚠️ DB lente",
+                "✅ Performance OK" if total_time < 3 else "❌ Performance dégradée"
+            ]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
 @app.route('/test_logos')
 def test_logos():
     """Page de test pour voir les logos"""
@@ -1903,19 +1942,32 @@ def match_details(match_id):
 @app.route('/')
 def home():
     try:
+        import time
+        start_time = time.time()
+
         selected_sport = request.args.get("sport", "").strip()
         selected_league = request.args.get("league", "").strip()
         selected_status = request.args.get("status", "").strip()
 
-        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=50&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
-        response = requests.get(api_url)
+        # Réduire le nombre de matchs pour améliorer les performances
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=20&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+
+        print(f"⏱️ Début requête API...")
+        api_start = time.time()
+        response = requests.get(api_url, timeout=10)  # Timeout pour éviter les blocages
         matches = response.json().get("Value", [])
+        api_time = time.time() - api_start
+        print(f"⏱️ API récupérée en {api_time:.2f}s - {len(matches)} matchs")
 
         sports_detected = set()
         leagues_detected = set()
         data = []
 
-        for match in matches:
+        print(f"⏱️ Début traitement {len(matches)} matchs...")
+        processing_start = time.time()
+
+        # Traiter seulement les matchs pertinents pour améliorer les performances
+        for i, match in enumerate(matches):
             try:
                 league = match.get("LE", "–")
                 team1 = match.get("O1", "–")
@@ -1999,148 +2051,35 @@ def home():
                 match_ts = match.get("S", 0)
                 match_time = datetime.utcfromtimestamp(match_ts).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
 
-                # --- Extraction ULTRA-COMPLÈTE des cotes ---
-                all_odds = {}  # Dictionnaire pour stocker toutes les cotes
+                # --- Extraction RAPIDE des cotes 1X2 SEULEMENT pour page principale ---
+                main_odds = {}
 
-                # 1. Extraire les cotes principales (E)
+                # 1. Chercher dans E (cotes principales)
                 for o in match.get("E", []):
-                    group = o.get("G")
-                    bet_type = o.get("T")
-                    cote = o.get("C")
-                    param = o.get("P")
+                    if o.get("G") == 1 and o.get("T") in [1, 2, 3] and o.get("C") is not None:
+                        main_odds[{1: "1", 2: "2", 3: "X"}[o.get("T")]] = o.get("C")
 
-                    if cote is not None:
-                        # Cotes 1X2 (G=1)
-                        if group == 1 and bet_type in [1, 2, 3]:
-                            all_odds[{1: "1", 2: "2", 3: "X"}[bet_type]] = cote
+                # 2. Si pas trouvé, chercher dans AE (alternatives)
+                if len(main_odds) < 3:
+                    for ae in match.get("AE", []):
+                        if ae.get("G") == 1:
+                            for o in ae.get("ME", []):
+                                if o.get("T") in [1, 2, 3] and o.get("C") is not None:
+                                    key = {1: "1", 2: "2", 3: "X"}[o.get("T")]
+                                    if key not in main_odds:
+                                        main_odds[key] = o.get("C")
 
-                        # Over/Under buts totaux
-                        elif group == 5:
-                            if param and param > 0:
-                                all_odds[f"Over {param}"] = cote
-                            elif param and param < 0:
-                                all_odds[f"Under {abs(param)}"] = cote
-
-                        # Double Chance (G=2)
-                        elif group == 2:
-                            if bet_type == 1:
-                                all_odds["1X"] = cote
-                            elif bet_type == 2:
-                                all_odds["12"] = cote
-                            elif bet_type == 3:
-                                all_odds["X2"] = cote
-
-                        # BTTS (G=3)
-                        elif group == 3:
-                            if bet_type == 1:
-                                all_odds["BTTS Oui"] = cote
-                            elif bet_type == 2:
-                                all_odds["BTTS Non"] = cote
-
-                        # Handicap (G=4)
-                        elif group == 4:
-                            if param:
-                                if bet_type == 1:
-                                    all_odds[f"Handicap 1 ({param:+g})"] = cote
-                                elif bet_type == 2:
-                                    all_odds[f"Handicap 2 ({param:+g})"] = cote
-
-                        # Score exact (G=6)
-                        elif group == 6:
-                            all_odds[f"Score exact {bet_type}"] = cote
-
-                        # Mi-temps/Fin (G=7)
-                        elif group == 7:
-                            all_odds[f"Mi-temps/Fin {bet_type}"] = cote
-
-                        # Premier buteur (G=8)
-                        elif group == 8:
-                            all_odds[f"Premier buteur {bet_type}"] = cote
-
-                        # Autres groupes
-                        else:
-                            all_odds[f"Groupe {group} Type {bet_type}"] = cote
-
-                # 2. Extraire les cotes alternatives (AE) - TOUTES
-                for ae in match.get("AE", []):
-                    for o in ae.get("ME", []):
-                        group = o.get("G")
-                        bet_type = o.get("T")
-                        cote = o.get("C")
-                        param = o.get("P")
-
-                        if cote is not None:
-                            # Cotes 1X2 si pas encore trouvées
-                            if group == 1 and bet_type in [1, 2, 3]:
-                                key = {1: "1", 2: "2", 3: "X"}[bet_type]
-                                if key not in all_odds:
-                                    all_odds[key] = cote
-
-                            # Over/Under avec tous les paramètres
-                            elif group == 5 and param is not None:
-                                if param > 0:
-                                    all_odds[f"Over {param}"] = cote
-                                else:
-                                    all_odds[f"Under {abs(param)}"] = cote
-
-                            # Double Chance
-                            elif group == 2:
-                                dc_map = {1: "1X", 2: "12", 3: "X2"}
-                                if bet_type in dc_map and dc_map[bet_type] not in all_odds:
-                                    all_odds[dc_map[bet_type]] = cote
-
-                            # BTTS
-                            elif group == 3:
-                                btts_map = {1: "BTTS Oui", 2: "BTTS Non"}
-                                if bet_type in btts_map and btts_map[bet_type] not in all_odds:
-                                    all_odds[btts_map[bet_type]] = cote
-
-                            # Handicap
-                            elif group == 4 and param is not None:
-                                if bet_type == 1:
-                                    all_odds[f"Handicap 1 ({param:+g})"] = cote
-                                elif bet_type == 2:
-                                    all_odds[f"Handicap 2 ({param:+g})"] = cote
-
-                            # Corners
-                            elif group == 9:
-                                if param:
-                                    all_odds[f"Corners Over {param}"] = cote
-                                else:
-                                    all_odds[f"Corners {bet_type}"] = cote
-
-                            # Cartons
-                            elif group == 10:
-                                if param:
-                                    all_odds[f"Cartons Over {param}"] = cote
-                                else:
-                                    all_odds[f"Cartons {bet_type}"] = cote
-
-                            # Autres cotes alternatives
-                            else:
-                                if param:
-                                    all_odds[f"G{group}T{bet_type}P{param}"] = cote
-                                else:
-                                    all_odds[f"G{group}T{bet_type}"] = cote
-
-                # Formater les cotes pour l'affichage (seulement 1X2 pour page principale)
-                main_odds = []
-                for bet_type in ["1", "X", "2"]:
-                    if bet_type in all_odds:
-                        main_odds.append(f"{bet_type}: {all_odds[bet_type]}")
-
+                # Formater pour affichage
                 if main_odds:
-                    formatted_odds = main_odds  # Seulement 1X2 pour la page principale
-                    print(f"📊 Cotes extraites pour {team1} vs {team2}: {len(all_odds)} types (affichage: 1X2)")
+                    formatted_odds = [f"{bet_type}: {cote}" for bet_type, cote in main_odds.items()]
                 else:
                     formatted_odds = ["Pas de cotes disponibles"]
-                    print(f"❌ Aucune cote trouvée pour {team1} vs {team2}")
 
-                # Prédiction basée sur les cotes 1X2
+                # Prédiction simple basée sur la cote la plus faible
                 odds_data = []
                 for bet_type in ["1", "X", "2"]:
-                    if bet_type in all_odds:
-                        odds_data.append({"type": bet_type, "cote": all_odds[bet_type]})
+                    if bet_type in main_odds:
+                        odds_data.append({"type": bet_type, "cote": main_odds[bet_type]})
 
                 prediction = "–"
                 if odds_data:
@@ -2168,7 +2107,7 @@ def home():
                     "temp": temp,
                     "humid": humid,
                     "odds": formatted_odds,  # Seulement 1X2 pour affichage
-                    "all_odds": all_odds,    # TOUTES les cotes pour les prédictions
+                    "all_odds": main_odds,   # Cotes principales pour les prédictions
                     "prediction": prediction,
                     "id": match.get("I", None),
                     "team1_logo": team1_logo,
@@ -2198,53 +2137,22 @@ def home():
                     print(f"Erreur analyse H2H: {e}")
                     match_data["analytics_confidence"] = 0.5
 
-                # Prédiction ML avec fallback
+                # Prédiction simple pour performance optimisée
+                match_data["prediction"] = f"{prediction}"
+                match_data["ml_prediction"] = None
+                match_data["ml_confidence"] = 0.5
+
+                # Sauvegarder seulement si nécessaire (optimisation)
                 try:
-                    ml_prediction, ml_confidence = get_ml_prediction(match_data)
-                    if ml_prediction:
-                        match_data["ml_prediction"] = ml_prediction
-                        match_data["ml_confidence"] = ml_confidence
-
-                        # Améliorer la prédiction affichée avec le ML et l'analytics
-                        ml_prediction_text = {
-                            "1": f"{team1} gagne (ML)",
-                            "2": f"{team2} gagne (ML)",
-                            "X": "Match nul (ML)"
-                        }.get(ml_prediction, prediction)
-
-                        # Combiner ML et analytics pour une confiance globale
-                        combined_confidence = (ml_confidence + match_data.get("analytics_confidence", 0.5)) / 2
-
-                        # Si la confiance combinée est élevée, utiliser la prédiction ML
-                        if combined_confidence > 0.6:
-                            match_data["prediction"] = f"{ml_prediction_text} ({combined_confidence:.1%})"
-                        else:
-                            match_data["prediction"] = f"{prediction} | {ml_prediction_text} ({combined_confidence:.1%})"
+                    saved_match = save_match_to_db(match_data)
+                    if saved_match:
+                        match_data["id"] = saved_match.id
+                        print(f"✅ Match sauvegardé avec ID: {saved_match.id} - {team1} vs {team2}")
                     else:
-                        # Fallback: prédiction basée sur les cotes uniquement
-                        match_data["prediction"] = f"{prediction} (Cotes)"
-                        match_data["ml_prediction"] = None
-                        match_data["ml_confidence"] = 0.5
+                        print(f"❌ Échec sauvegarde match: {team1} vs {team2}")
+                        match_data["id"] = None
                 except Exception as e:
-                    print(f"Erreur prédiction ML: {e}")
-                    # Fallback: prédiction basée sur les cotes + analytics
-                    analytics_conf = match_data.get("analytics_confidence", 0.5)
-                    if analytics_conf > 0.6:
-                        match_data["prediction"] = f"{prediction} (Analytics {analytics_conf:.1%})"
-                    else:
-                        match_data["prediction"] = f"{prediction} (Cotes)"
-                    match_data["ml_prediction"] = None
-                    match_data["ml_confidence"] = 0.5
-
-                # Sauvegarder dans la base de données
-                saved_match = save_match_to_db(match_data)
-
-                # Mettre à jour l'ID avec celui de la base de données
-                if saved_match:
-                    match_data["id"] = saved_match.id
-                    print(f"✅ Match sauvegardé avec ID: {saved_match.id} - {team1} vs {team2}")
-                else:
-                    print(f"❌ Échec sauvegarde match: {team1} vs {team2}")
+                    print(f"⚠️ Erreur sauvegarde match {team1} vs {team2}: {e}")
                     match_data["id"] = None
 
                 # Sauvegarder l'évolution du match avec les cotes actuelles
@@ -2260,6 +2168,20 @@ def home():
             except Exception as e:
                 print(f"Erreur lors du traitement d'un match: {e}")
                 continue
+
+        # Logs de performance
+        total_time = time.time() - start_time
+        print(f"⏱️ Page principale générée en {total_time:.2f}s - {len(data)} matchs traités")
+
+        # Filtrage optimisé
+        if selected_sport:
+            data = [m for m in data if m["sport"].lower() == selected_sport.lower()]
+        if selected_league:
+            data = [m for m in data if selected_league.lower() in m["league"].lower()]
+        if selected_status:
+            data = [m for m in data if selected_status.lower() in m["status"].lower()]
+
+        print(f"⏱️ Après filtrage: {len(data)} matchs affichés")
 
         # --- Pagination ---
         try:
