@@ -15,9 +15,10 @@ def home():
         selected_league = request.args.get("league", "").strip()
         selected_status = request.args.get("status", "").strip()
 
-        api_url = ""
+        # URL de l'API 1xbet
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=100&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
         response = requests.get(api_url)
-        matches = response.json().get("Value", [])https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=100&lng=fr&gr=70&mode=4&country=96&getEmpty=true
+        matches = response.json().get("Value", [])
 
         sports_detected = set()
         leagues_detected = set()
@@ -241,54 +242,74 @@ def traduire_pari(nom, valeur=None):
         return (nom_str.capitalize(), choix)
 
 def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
-    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping exact basé sur la documentation API."""
+    """
+    Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping officiel.
 
-    # 1X2 - Groupe 1
+    MAPPING OFFICIEL 1XBET :
+    ========================
+    Groupe 1 (1X2) : T=1→O1, T=2→Nul, T=3→O2
+    Groupe 2 (Handicap asiatique) : T=7→O1, T=8→O2
+    Groupe 8 (Handicap européen) : T=4-6→Dépend du handicap
+    Groupe 17 (Over/Under) : T=9/10→Total (aucune équipe)
+    """
+
+    # Groupe 1 - Résultat 1X2
     if groupe == 1:
         if type_pari == 1:
-            return f"Victoire {team1}"
+            return f"Victoire {team1} (O1)"
         elif type_pari == 2:
-            return f"Victoire {team2}"
-        elif type_pari == 3:
             return "Match nul"
+        elif type_pari == 3:
+            return f"Victoire {team2} (O2)"
         return "1X2"
 
-    # Handicap - Groupe 2
+    # Groupe 2 - Handicap asiatique (MAPPING OFFICIEL)
     if groupe == 2:
         if param is not None:
-            handicap_val = float(param)
-            if type_pari == 1:
-                return f"Handicap {team1} ({param:+g}) - {team1} avec avantage"
-            elif type_pari == 2:
-                return f"Handicap {team2} ({param:+g}) - {team2} avec avantage"
-            elif type_pari == 7:  # Basé sur l'exemple JSON
-                if handicap_val < 0:
-                    return f"Handicap {team1} ({param:+g}) - {team1} avec désavantage"
-                else:
-                    return f"Handicap {team2} ({param:+g}) - {team2} avec avantage"
-        return "Handicap"
+            if type_pari == 7:  # T=7 → Pari sur Équipe 1 (O1)
+                return f"Handicap asiatique {team1} ({param:+g}) - Pari sur O1"
+            elif type_pari == 8:  # T=8 → Pari sur Équipe 2 (O2)
+                return f"Handicap asiatique {team2} ({param:+g}) - Pari sur O2"
+            else:
+                return f"Handicap asiatique ({param:+g}) - Type T{type_pari}"
+        return "Handicap asiatique"
 
-    # Over/Under Total - Groupes courants pour les totaux
-    if groupe in [8, 17, 62, 5, 12]:
+    # Groupe 8 - Handicap européen (MAPPING OFFICIEL)
+    if groupe == 8:
         if param is not None:
             seuil = abs(float(param))
-            param_val = float(param)
-
-            # Nouvelle logique : si le paramètre est négatif, c'est "Under" (Moins de)
-            # Si le paramètre est positif, c'est "Over" (Plus de)
-            if param_val < 0:
-                return f"Moins de {seuil} buts (TOTAL du match)"
-            elif param_val > 0:
-                return f"Plus de {seuil} buts (TOTAL du match)"
-            else:
-                # Si param = 0, utiliser le type pour déterminer
-                if type_pari == 1:
-                    return f"Plus de {seuil} buts (TOTAL du match)"
-                elif type_pari == 2:
-                    return f"Moins de {seuil} buts (TOTAL du match)"
+            if type_pari in [4, 5, 6]:  # T=4-6 → Dépend du handicap fixé
+                if float(param) > 0:
+                    return f"Handicap européen {team1} (+{seuil}) - Avantage O1"
                 else:
-                    return f"Total {seuil} buts (TOTAL du match)"
-        return "Plus/Moins de buts (TOTAL)"
+                    return f"Handicap européen {team2} (-{seuil}) - Désavantage O1"
+            else:
+                return f"Handicap européen ({param:+g}) - Type T{type_pari}"
+        return "Handicap européen"
+
+    # Groupe 17 - Over/Under (MAPPING OFFICIEL)
+    if groupe == 17:
+        if param is not None:
+            seuil = abs(float(param))
+            if type_pari == 9:  # T=9 → Over (Plus de) - TOTAL
+                return f"Plus de {seuil} buts (TOTAL du match)"
+            elif type_pari == 10:  # T=10 → Under (Moins de) - TOTAL
+                return f"Moins de {seuil} buts (TOTAL du match)"
+            else:
+                return f"Total {seuil} buts - Type T{type_pari}"
+        return "Over/Under (TOTAL)"
+
+    # Autres groupes Over/Under possibles
+    if groupe in [62, 5, 12]:
+        if param is not None:
+            seuil = abs(float(param))
+            if type_pari == 9:
+                return f"Plus de {seuil} buts (TOTAL du match)"
+            elif type_pari == 10:
+                return f"Moins de {seuil} buts (TOTAL du match)"
+            else:
+                return f"Total {seuil} buts - G{groupe} T{type_pari}"
+        return "Plus/Moins de buts"
     # Double chance - Groupe 3
     if groupe == 3:
         if type_pari == 1:
@@ -360,7 +381,7 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
     try:
-        # Récupérer les données de l'API (ou brute.json si besoin)
+        # Récupérer les données de l'API 1xbet
         api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=100&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
         response = requests.get(api_url)
         matches = response.json().get("Value", [])
