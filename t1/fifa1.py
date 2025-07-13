@@ -29,45 +29,61 @@ def home():
                 sports_detected.add(sport)
                 leagues_detected.add(league)
 
-                # --- Score ---
-                score1 = match.get("SC", {}).get("FS", {}).get("S1")
-                score2 = match.get("SC", {}).get("FS", {}).get("S2")
+                # --- Score --- (Structure corrigée selon l'API)
+                sc = match.get("SC", {})
+                fs = sc.get("FS", {})
+
+                # Essayer différentes structures possibles pour les scores
+                score1 = 0
+                score2 = 0
+
+                if isinstance(fs, dict):
+                    score1 = fs.get("S1", 0) or fs.get("1", 0) or 0
+                    score2 = fs.get("S2", 0) or fs.get("2", 0) or 0
+                elif isinstance(fs, list) and len(fs) >= 2:
+                    score1 = fs[0] if fs[0] is not None else 0
+                    score2 = fs[1] if fs[1] is not None else 0
+
+                # Conversion sécurisée en entier
                 try:
                     score1 = int(score1) if score1 is not None else 0
-                except:
+                except (ValueError, TypeError):
                     score1 = 0
                 try:
                     score2 = int(score2) if score2 is not None else 0
-                except:
+                except (ValueError, TypeError):
                     score2 = 0
 
-                # --- Minute ---
+                # --- Minute et Statut --- (Structure corrigée selon l'API)
                 minute = None
-                # Prendre d'abord SC.TS (temps écoulé en secondes)
                 sc = match.get("SC", {})
+
+                # Récupération du temps (TS = timestamp en secondes)
                 if "TS" in sc and isinstance(sc["TS"], int):
                     minute = sc["TS"] // 60
-                elif "ST" in sc and isinstance(sc["ST"], int):
-                    minute = sc["ST"]
                 elif "T" in match and isinstance(match["T"], int):
-                    minute = match["T"] // 60
+                    minute = match["T"]
 
-                # --- Statut ---
+                # Récupération du statut du match
+                hs = match.get("HS", 0)  # Statut principal
                 tn = match.get("TN", "").lower()
                 tns = match.get("TNS", "").lower()
-                tt = match.get("SC", {}).get("TT")
+                cps = sc.get("CPS", "")  # Statut du match dans SC
+
+                # Détermination du statut
                 statut = "À venir"
                 is_live = False
                 is_finished = False
                 is_upcoming = False
-                if (minute is not None and minute > 0) or (score1 > 0 or score2 > 0):
+
+                # Logique basée sur HS et autres indicateurs
+                if hs == 1 or "live" in cps.lower() or (minute is not None and minute > 0):
                     statut = f"En cours ({minute}′)" if minute else "En cours"
                     is_live = True
-                if ("terminé" in tn or "terminé" in tns) or (tt == 3):
+                elif hs == 3 or "terminé" in tn or "finished" in tns.lower() or "final" in cps.lower():
                     statut = "Terminé"
-                    is_live = False
                     is_finished = True
-                if statut == "À venir":
+                elif hs == 0 or statut == "À venir":
                     is_upcoming = True
 
                 if selected_sport and sport != selected_sport:
@@ -117,10 +133,16 @@ def home():
                         "X": "Match nul"
                     }.get(best["type"], "–")
 
-                # --- Météo ---
+                # --- Météo --- (Structure corrigée, souvent absente dans l'API)
+                # La météo n'est pas toujours disponible dans cette API
+                temp = "–"
+                humid = "–"
+
+                # Essayer de récupérer les données météo si disponibles
                 meteo_data = match.get("MIS", [])
-                temp = next((item["V"] for item in meteo_data if item.get("K") == 9), "–")
-                humid = next((item["V"] for item in meteo_data if item.get("K") == 27), "–")
+                if meteo_data and isinstance(meteo_data, list):
+                    temp = next((item.get("V", "–") for item in meteo_data if item.get("K") == 9), "–")
+                    humid = next((item.get("V", "–") for item in meteo_data if item.get("K") == 27), "–")
 
                 data.append({
                     "team1": team1,
@@ -222,84 +244,112 @@ def traduire_pari(nom, valeur=None):
         return (nom_str.capitalize(), choix)
 
 def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
-    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping explicite, noms d'équipes et distinction Over/Under."""
-    # 1X2
-    if groupe == 1 and type_pari in [1, 2, 3]:
-        return {1: f"Victoire {team1}", 2: f"Victoire {team2}", 3: "Match nul"}.get(type_pari, "1X2")
-    # Handicap
+    """Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping exact basé sur la documentation API."""
+
+    # 1X2 - Groupe 1
+    if groupe == 1:
+        if type_pari == 1:
+            return f"Victoire {team1}"
+        elif type_pari == 2:
+            return f"Victoire {team2}"
+        elif type_pari == 3:
+            return "Match nul"
+        return "1X2"
+
+    # Handicap - Groupe 2
     if groupe == 2:
         if param is not None:
-            if type_pari == 1 and team1:
-                return f"Handicap {team1} ({param}) - {team1} gagne avec avantage"
-            elif type_pari == 2 and team2:
-                return f"Handicap {team2} ({param}) - {team2} gagne avec avantage"
-            else:
-                return f"Handicap ({param})"
+            handicap_val = float(param)
+            if type_pari == 1:
+                return f"Handicap {team1} ({param:+g}) - {team1} avec avantage"
+            elif type_pari == 2:
+                return f"Handicap {team2} ({param:+g}) - {team2} avec avantage"
+            elif type_pari == 7:  # Basé sur l'exemple JSON
+                if handicap_val < 0:
+                    return f"Handicap {team1} ({param:+g}) - {team1} avec désavantage"
+                else:
+                    return f"Handicap {team2} ({param:+g}) - {team2} avec avantage"
         return "Handicap"
-    # Over/Under (souvent G8 ou G17 ou G62)
-    if groupe in [8, 17, 62]:
+
+    # Over/Under Total - Groupes courants pour les totaux
+    if groupe in [8, 17, 62, 5, 12]:
         if param is not None:
             seuil = abs(float(param))
-            # Déterminer si c'est pour une équipe spécifique ou le total
-            if type_pari == 1:  # T=1 souvent pour équipe 1
-                if team1:
-                    return f"Plus de {seuil} buts pour {team1}"
-                else:
-                    return f"Plus de {seuil} buts (TOTAL du match)"
-            elif type_pari == 2:  # T=2 souvent pour équipe 2
-                if team2:
-                    return f"Plus de {seuil} buts pour {team2}"
-                else:
-                    return f"Plus de {seuil} buts (TOTAL du match)"
-            elif type_pari in [9]:  # T=9 = Over (Plus de) - TOTAL
+            # Logique basée sur le type T et le paramètre P
+            if type_pari == 1 or (param is not None and float(param) > 0):
                 return f"Plus de {seuil} buts (TOTAL du match)"
-            elif type_pari in [10]:  # T=10 = Under (Moins de) - TOTAL
+            elif type_pari == 2 or (param is not None and float(param) < 0):
                 return f"Moins de {seuil} buts (TOTAL du match)"
-            # fallback - analyser le paramètre pour deviner
-            if float(param) > 0:
-                return f"Plus de {seuil} buts (TOTAL du match)"
             else:
-                return f"Moins de {seuil} buts (TOTAL du match)"
-        return "Plus/Moins de buts"
-    # Score exact
+                return f"Total {seuil} buts (TOTAL du match)"
+        return "Plus/Moins de buts (TOTAL)"
+    # Double chance - Groupe 3
+    if groupe == 3:
+        if type_pari == 1:
+            return f"Double chance: {team1} ou Match nul"
+        elif type_pari == 2:
+            return f"Double chance: {team2} ou Match nul"
+        elif type_pari == 3:
+            return f"Double chance: {team1} ou {team2}"
+        return "Double chance"
+
+    # Score exact - Groupe 15
     if groupe == 15:
         if param is not None:
             return f"Score exact {param} ({team1} vs {team2})"
         return f"Score exact ({team1} vs {team2})"
-    # Double chance
-    if groupe == 3:
-        if type_pari == 1 and team1 and team2:
-            return f"Double chance {team1} ou {team2}"
-        elif type_pari == 2 and team1:
-            return f"Double chance {team1} ou Nul"
-        elif type_pari == 3 and team2:
-            return f"Double chance {team2} ou Nul"
-        return "Double chance"
-    # Nombre de buts par équipe ou total
-    if groupe in [19, 180, 181]:
-        if type_pari == 1 and team1:
-            return f"Nombre de buts marqués par {team1}"
-        elif type_pari == 2 and team2:
-            return f"Nombre de buts marqués par {team2}"
-        return "Nombre de buts (TOTAL du match)"
 
-    # Paris spécifiques par équipe (groupes courants)
-    if groupe in [20, 21, 22, 23, 24, 25]:  # Groupes souvent pour équipes spécifiques
-        if type_pari == 1 and team1:
-            return f"Pari spécial pour {team1} (G{groupe})"
-        elif type_pari == 2 and team2:
-            return f"Pari spécial pour {team2} (G{groupe})"
+    # Both teams to score - Groupe 19
+    if groupe == 19:
+        if type_pari == 1:
+            return "Les deux équipes marquent: OUI"
+        elif type_pari == 2:
+            return "Les deux équipes marquent: NON"
+        return "Les deux équipes marquent"
 
-    # Buts par mi-temps
-    if groupe in [30, 31, 32]:
-        if type_pari == 1 and team1:
-            return f"Buts {team1} (mi-temps)"
-        elif type_pari == 2 and team2:
-            return f"Buts {team2} (mi-temps)"
-        return "Buts par mi-temps (TOTAL)"
+    # Nombre de buts par équipe - Groupes spécifiques
+    if groupe in [20, 21, 22]:
+        if param is not None:
+            seuil = abs(float(param))
+            if type_pari == 1:
+                return f"Plus de {seuil} buts pour {team1}"
+            elif type_pari == 2:
+                return f"Moins de {seuil} buts pour {team1}"
+        return f"Buts marqués par {team1}"
 
-    # Ajoute d'autres mappings selon tes observations
-    return f"Pari spécial (G{groupe} T{type_pari})"
+    if groupe in [23, 24, 25]:
+        if param is not None:
+            seuil = abs(float(param))
+            if type_pari == 1:
+                return f"Plus de {seuil} buts pour {team2}"
+            elif type_pari == 2:
+                return f"Moins de {seuil} buts pour {team2}"
+        return f"Buts marqués par {team2}"
+
+    # Mi-temps/Fin de match - Groupe 4
+    if groupe == 4:
+        if type_pari == 1:
+            return f"Mi-temps: {team1} / Fin: {team1}"
+        elif type_pari == 2:
+            return f"Mi-temps: {team1} / Fin: Match nul"
+        elif type_pari == 3:
+            return f"Mi-temps: {team1} / Fin: {team2}"
+        elif type_pari == 4:
+            return f"Mi-temps: Match nul / Fin: {team1}"
+        elif type_pari == 5:
+            return f"Mi-temps: Match nul / Fin: Match nul"
+        elif type_pari == 6:
+            return f"Mi-temps: Match nul / Fin: {team2}"
+        elif type_pari == 7:
+            return f"Mi-temps: {team2} / Fin: {team1}"
+        elif type_pari == 8:
+            return f"Mi-temps: {team2} / Fin: Match nul"
+        elif type_pari == 9:
+            return f"Mi-temps: {team2} / Fin: {team2}"
+        return "Mi-temps/Fin de match"
+
+    # Fallback avec informations de debug
+    return f"Pari G{groupe}-T{type_pari}" + (f"-P{param}" if param is not None else "")
 
 @app.route('/match/<int:match_id>')
 def match_details(match_id):
@@ -316,26 +366,54 @@ def match_details(match_id):
         team2 = match.get("O2", "–")
         league = match.get("LE", "–")
         sport = detect_sport(league)
-        # Scores
-        score1 = match.get("SC", {}).get("FS", {}).get("S1")
-        score2 = match.get("SC", {}).get("FS", {}).get("S2")
+        # Scores (structure corrigée)
+        sc = match.get("SC", {})
+        fs = sc.get("FS", {})
+
+        score1 = 0
+        score2 = 0
+
+        if isinstance(fs, dict):
+            score1 = fs.get("S1", 0) or fs.get("1", 0) or 0
+            score2 = fs.get("S2", 0) or fs.get("2", 0) or 0
+        elif isinstance(fs, list) and len(fs) >= 2:
+            score1 = fs[0] if fs[0] is not None else 0
+            score2 = fs[1] if fs[1] is not None else 0
+
         try:
             score1 = int(score1) if score1 is not None else 0
-        except:
+        except (ValueError, TypeError):
             score1 = 0
         try:
             score2 = int(score2) if score2 is not None else 0
-        except:
+        except (ValueError, TypeError):
             score2 = 0
-        # Statistiques avancées
+        # Statistiques avancées (structure corrigée)
         stats = []
-        st = match.get("SC", {}).get("ST", [])
-        if st and isinstance(st, list) and len(st) > 0 and "Value" in st[0]:
-            for stat in st[0]["Value"]:
-                nom = stat.get("N", "?")
-                s1 = stat.get("S1", "0")
-                s2 = stat.get("S2", "0")
-                stats.append({"nom": nom, "s1": s1, "s2": s2})
+        sc = match.get("SC", {})
+
+        # Essayer différentes structures pour les statistiques
+        if "ST" in sc:
+            st = sc["ST"]
+            if isinstance(st, list) and len(st) > 0:
+                if isinstance(st[0], dict) and "Value" in st[0]:
+                    for stat in st[0]["Value"]:
+                        nom = stat.get("N", "Statistique")
+                        s1 = stat.get("S1", "0")
+                        s2 = stat.get("S2", "0")
+                        stats.append({"nom": nom, "s1": s1, "s2": s2})
+                elif isinstance(st[0], dict):
+                    # Structure alternative
+                    for key, value in st[0].items():
+                        if isinstance(value, dict) and "S1" in value and "S2" in value:
+                            stats.append({"nom": key, "s1": value["S1"], "s2": value["S2"]})
+
+        # Si pas de statistiques, ajouter des stats basiques
+        if not stats:
+            stats = [
+                {"nom": "Score", "s1": str(score1), "s2": str(score2)},
+                {"nom": "Statut", "s1": "–", "s2": "–"}
+            ]
         # Explication prédiction (simple)
         explication = "La prédiction est basée sur les cotes et les statistiques principales (tirs, possession, etc.)."  # Peut être enrichi
         # Prédiction 1X2
@@ -374,10 +452,15 @@ def match_details(match_id):
                 nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2)
                 valeur = param if param is not None else ""
                 cote = o.get("C")
+
+                # Debug info pour mieux comprendre les types
+                debug_info = f" [G{groupe}-T{type_pari}]" if groupe in [8, 17, 62] else ""
+
                 paris_alternatifs.append({
-                    "nom": nom_traduit,
+                    "nom": nom_traduit + debug_info,
                     "valeur": valeur,
-                    "cote": cote
+                    "cote": cote,
+                    "raw_data": {"G": groupe, "T": type_pari, "P": param}  # Pour debug
                 })
         # 2. AE (marchés alternatifs étendus)
         for ae in match.get("AE", []):
@@ -390,10 +473,15 @@ def match_details(match_id):
                         nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2)
                         valeur = param if param is not None else ""
                         cote = o.get("C")
+
+                        # Debug info pour mieux comprendre les types
+                        debug_info = f" [G{groupe}-T{type_pari}]" if groupe in [8, 17, 62] else ""
+
                         paris_alternatifs.append({
-                            "nom": nom_traduit,
+                            "nom": nom_traduit + debug_info,
                             "valeur": valeur,
-                            "cote": cote
+                            "cote": cote,
+                            "raw_data": {"G": groupe, "T": type_pari, "P": param}  # Pour debug
                         })
         # Filtrer les paris alternatifs selon la cote demandée
         paris_alternatifs = [p for p in paris_alternatifs if 1.499 <= float(p["cote"]) <= 3]
