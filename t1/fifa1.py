@@ -275,13 +275,22 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
     if groupe in [8, 17, 62, 5, 12]:
         if param is not None:
             seuil = abs(float(param))
-            # Logique basée sur le type T et le paramètre P
-            if type_pari == 1 or (param is not None and float(param) > 0):
-                return f"Plus de {seuil} buts (TOTAL du match)"
-            elif type_pari == 2 or (param is not None and float(param) < 0):
+            param_val = float(param)
+
+            # Nouvelle logique : si le paramètre est négatif, c'est "Under" (Moins de)
+            # Si le paramètre est positif, c'est "Over" (Plus de)
+            if param_val < 0:
                 return f"Moins de {seuil} buts (TOTAL du match)"
+            elif param_val > 0:
+                return f"Plus de {seuil} buts (TOTAL du match)"
             else:
-                return f"Total {seuil} buts (TOTAL du match)"
+                # Si param = 0, utiliser le type pour déterminer
+                if type_pari == 1:
+                    return f"Plus de {seuil} buts (TOTAL du match)"
+                elif type_pari == 2:
+                    return f"Moins de {seuil} buts (TOTAL du match)"
+                else:
+                    return f"Total {seuil} buts (TOTAL du match)"
         return "Plus/Moins de buts (TOTAL)"
     # Double chance - Groupe 3
     if groupe == 3:
@@ -454,7 +463,9 @@ def match_details(match_id):
                 cote = o.get("C")
 
                 # Debug info pour mieux comprendre les types
-                debug_info = f" [G{groupe}-T{type_pari}]" if groupe in [8, 17, 62] else ""
+                debug_info = ""
+                if groupe in [8, 17, 62, 5, 12]:  # Groupes Over/Under
+                    debug_info = f" [G{groupe}-T{type_pari}-P{param}]"
 
                 paris_alternatifs.append({
                     "nom": nom_traduit + debug_info,
@@ -475,7 +486,9 @@ def match_details(match_id):
                         cote = o.get("C")
 
                         # Debug info pour mieux comprendre les types
-                        debug_info = f" [G{groupe}-T{type_pari}]" if groupe in [8, 17, 62] else ""
+                        debug_info = ""
+                        if groupe in [8, 17, 62, 5, 12]:  # Groupes Over/Under
+                            debug_info = f" [G{groupe}-T{type_pari}-P{param}]"
 
                         paris_alternatifs.append({
                             "nom": nom_traduit + debug_info,
