@@ -241,9 +241,27 @@ def traduire_pari(nom, valeur=None):
     else:
         return (nom_str.capitalize(), choix)
 
-def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
+def detecter_contexte_pari(match_data):
+    """Détecte le contexte du pari (match complet, mi-temps, etc.) basé sur les données du match"""
+    # Analyser les indicateurs de contexte dans les données
+    tn = match_data.get("TN", "").lower()
+    tns = match_data.get("TNS", "").lower()
+    sc = match_data.get("SC", {})
+    cps = sc.get("CPS", "").lower()
+
+    # Détection du contexte
+    if "1st half" in tns or "première" in tn or "1ère" in cps:
+        return "première_mi_temps"
+    elif "2nd half" in tns or "deuxième" in tn or "2ème" in cps:
+        return "deuxième_mi_temps"
+    elif "half" in tns or "mi-temps" in tn:
+        return "mi_temps"
+    else:
+        return "match_complet"
+
+def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, contexte="match_complet"):
     """
-    Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping officiel.
+    Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping officiel et contexte.
 
     MAPPING OFFICIEL 1XBET :
     ========================
@@ -251,28 +269,44 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
     Groupe 2 (Handicap asiatique) : T=7→O1, T=8→O2
     Groupe 8 (Handicap européen) : T=4-6→Dépend du handicap
     Groupe 17 (Over/Under) : T=9/10→Total (aucune équipe)
+    Groupe 19 (Pair/Impair) : T=180→Pair, T=181→Impair
+
+    CONTEXTES :
+    ===========
+    - match_complet : Paris sur le match entier
+    - première_mi_temps : Paris sur la 1ère mi-temps uniquement
+    - deuxième_mi_temps : Paris sur la 2ème mi-temps uniquement
+    - mi_temps : Paris sur une mi-temps (non spécifiée)
     """
+
+    # Suffixe de contexte
+    contexte_suffix = {
+        "première_mi_temps": " (1ère mi-temps)",
+        "deuxième_mi_temps": " (2ème mi-temps)",
+        "mi_temps": " (mi-temps)",
+        "match_complet": ""
+    }.get(contexte, "")
 
     # Groupe 1 - Résultat 1X2
     if groupe == 1:
         if type_pari == 1:
-            return f"Victoire {team1} (O1)"
+            return f"Victoire {team1} (O1){contexte_suffix}"
         elif type_pari == 2:
-            return "Match nul"
+            return f"Match nul{contexte_suffix}"
         elif type_pari == 3:
-            return f"Victoire {team2} (O2)"
-        return "1X2"
+            return f"Victoire {team2} (O2){contexte_suffix}"
+        return f"1X2{contexte_suffix}"
 
     # Groupe 2 - Handicap asiatique (MAPPING OFFICIEL)
     if groupe == 2:
         if param is not None:
             if type_pari == 7:  # T=7 → Pari sur Équipe 1 (O1)
-                return f"Handicap asiatique {team1} ({param:+g}) - Pari sur O1"
+                return f"Handicap asiatique {team1} ({param:+g}) - Pari sur O1{contexte_suffix}"
             elif type_pari == 8:  # T=8 → Pari sur Équipe 2 (O2)
-                return f"Handicap asiatique {team2} ({param:+g}) - Pari sur O2"
+                return f"Handicap asiatique {team2} ({param:+g}) - Pari sur O2{contexte_suffix}"
             else:
-                return f"Handicap asiatique ({param:+g}) - Type T{type_pari}"
-        return "Handicap asiatique"
+                return f"Handicap asiatique ({param:+g}) - Type T{type_pari}{contexte_suffix}"
+        return f"Handicap asiatique{contexte_suffix}"
 
     # Groupe 8 - Handicap européen (MAPPING OFFICIEL)
     if groupe == 8:
@@ -291,13 +325,14 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
     if groupe == 17:
         if param is not None:
             seuil = abs(float(param))
+            total_text = "TOTAL du match" if contexte == "match_complet" else f"TOTAL {contexte.replace('_', ' ')}"
             if type_pari == 9:  # T=9 → Over (Plus de) - TOTAL
-                return f"Plus de {seuil} buts (TOTAL du match)"
+                return f"Plus de {seuil} buts ({total_text})"
             elif type_pari == 10:  # T=10 → Under (Moins de) - TOTAL
-                return f"Moins de {seuil} buts (TOTAL du match)"
+                return f"Moins de {seuil} buts ({total_text})"
             else:
-                return f"Total {seuil} buts - Type T{type_pari}"
-        return "Over/Under (TOTAL)"
+                return f"Total {seuil} buts - Type T{type_pari}{contexte_suffix}"
+        return f"Over/Under (TOTAL){contexte_suffix}"
 
     # Autres groupes Over/Under possibles
     if groupe in [62, 5, 12]:
@@ -326,13 +361,18 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
             return f"Score exact {param} ({team1} vs {team2})"
         return f"Score exact ({team1} vs {team2})"
 
-    # Both teams to score - Groupe 19
+    # Groupe 19 - Pair/Impair (MAPPING OFFICIEL)
     if groupe == 19:
-        if type_pari == 1:
+        if type_pari == 180:  # T=180 → Total de buts pair
+            return "Total de buts PAIR (0, 2, 4, 6...)"
+        elif type_pari == 181:  # T=181 → Total de buts impair
+            return "Total de buts IMPAIR (1, 3, 5, 7...)"
+        elif type_pari == 1:  # Fallback pour ancienne logique
             return "Les deux équipes marquent: OUI"
-        elif type_pari == 2:
+        elif type_pari == 2:  # Fallback pour ancienne logique
             return "Les deux équipes marquent: NON"
-        return "Les deux équipes marquent"
+        else:
+            return f"Pair/Impair - Type T{type_pari}"
 
     # Nombre de buts par équipe - Groupes spécifiques
     if groupe in [20, 21, 22]:
@@ -470,7 +510,9 @@ def match_details(match_id):
                 type_pari = o.get("T")
                 groupe = o.get("G")
                 param = o.get("P") if "P" in o else None
-                nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2)
+                # Détecter le contexte du match
+                contexte = detecter_contexte_pari(match)
+                nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2, contexte)
                 valeur = param if param is not None else ""
                 cote = o.get("C")
 
@@ -493,7 +535,9 @@ def match_details(match_id):
                         type_pari = o.get("T")
                         groupe = o.get("G")
                         param = o.get("P") if "P" in o else None
-                        nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2)
+                        # Détecter le contexte du match
+                        contexte = detecter_contexte_pari(match)
+                        nom_traduit = traduire_pari_type_groupe(type_pari, groupe, param, team1, team2, contexte)
                         valeur = param if param is not None else ""
                         cote = o.get("C")
 
@@ -741,6 +785,11 @@ def generer_prediction_lisible(nom, valeur, team1, team2):
         return f"🛡️ SÉCURISÉ: {nom}"
     if nom.startswith("Nombre de buts"):
         return f"📊 STATISTIQUES: {nom}"
+    if "PAIR" in nom or "IMPAIR" in nom:
+        if "PAIR" in nom:
+            return f"🔢 PAIR: {nom} (Résultat: 0, 2, 4, 6...)"
+        else:
+            return f"🔢 IMPAIR: {nom} (Résultat: 1, 3, 5, 7...)"
 
     return f"📋 AUTRE: {nom}"
 
