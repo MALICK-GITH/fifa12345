@@ -808,9 +808,9 @@ def match_details(match_id):
                 <strong>{pred_quantique['niveau']}</strong> - {pred_quantique['recommandation']}
             </div>
             <div style='margin-top: 15px; font-size: 12px; text-align: center; opacity: 0.8;'>
-                🌀 {prediction_quantique['facteurs_quantiques']['patterns_detectes']} Patterns Quantiques |
-                🤖 {prediction_quantique['facteurs_quantiques']['algorithmes_utilises']} Algorithmes ML |
-                📊 {prediction_quantique['facteurs_quantiques']['dimensions_analysees']} Dimensions
+                🎲 {prediction_quantique['facteurs_quantiques'].get('paris_analyses', 0)} Paris Analysés |
+                💰 {prediction_quantique['facteurs_quantiques'].get('opportunites_detectees', 0)} Opportunités |
+                🎯 {prediction_quantique['facteurs_quantiques'].get('types_paris', 0)} Types Paris
             </div>
         </div>"""
 
