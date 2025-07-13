@@ -7,21 +7,51 @@ import re
 import json
 from collections import defaultdict
 
-# Import optionnel du système quantique
+# Import du système quantique simplifié (compatible Render)
 try:
     from systeme_prediction_quantique import SystemePredictionQuantique
     QUANTIQUE_DISPONIBLE = True
+    print("✅ Système quantique complet chargé")
 except ImportError:
-    QUANTIQUE_DISPONIBLE = False
-    print("⚠️ Système quantique non disponible - fonctionnalités de base activées")
+    try:
+        from systeme_prediction_simple import SystemePredictionQuantique
+        QUANTIQUE_DISPONIBLE = True
+        print("✅ Système quantique simplifié chargé (compatible Render)")
+    except ImportError:
+        QUANTIQUE_DISPONIBLE = False
+        print("⚠️ Aucun système quantique disponible")
 
-# Import optionnel de numpy
-try:
-    import numpy as np
-    NUMPY_DISPONIBLE = True
-except ImportError:
-    NUMPY_DISPONIBLE = False
-    print("⚠️ NumPy non disponible - calculs simplifiés activés")
+# Import optionnel de numpy (désactivé pour Render)
+NUMPY_DISPONIBLE = False
+# Simulation des fonctions NumPy avec Python standard
+import math
+import random
+
+class NumpySimulation:
+    """Simulation des fonctions NumPy essentielles avec Python standard"""
+
+    @staticmethod
+    def array(data):
+        return list(data)
+
+    @staticmethod
+    def mean(data):
+        return sum(data) / len(data) if data else 0
+
+    @staticmethod
+    def std(data):
+        if not data:
+            return 0
+        mean_val = sum(data) / len(data)
+        variance = sum((x - mean_val) ** 2 for x in data) / len(data)
+        return math.sqrt(variance)
+
+    @staticmethod
+    def random():
+        return random.random()
+
+# Utilisation de la simulation
+np = NumpySimulation()
 
 app = Flask(__name__)
 
