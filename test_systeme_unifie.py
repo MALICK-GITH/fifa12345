@@ -66,11 +66,20 @@ def test_systeme_unifie():
         print(f"   - Équipe cible: {option['equipe_cible']}")
         print()
     
-    print("🤖 PRÉDICTION UNIFIÉE FINALE:")
+    print("🤖 DÉCISION COLLECTIVE FINALE:")
     prediction_finale = systeme.generer_prediction_unifiee()
     print(f"   {prediction_finale}")
     print()
-    
+
+    # Test de la délibération interne
+    print("🔍 DÉTAILS DE LA DÉLIBÉRATION:")
+    donnees = systeme._collecter_donnees_tous_systemes()
+    decision = systeme._deliberation_collective(donnees)
+    print(f"   Type de décision: {decision['type_decision']}")
+    print(f"   Confiance collective: {decision['confiance_collective']}%")
+    print(f"   Option choisie: {decision['option_finale']['prediction'] if decision['option_finale'] else 'Aucune'}")
+    print()
+
     print("✅ Test terminé avec succès!")
 
 def test_cas_multiples():
@@ -96,14 +105,19 @@ def test_cas_multiples():
     
     for i, cas in enumerate(cas_tests, 1):
         print(f"\n📋 CAS {i}: {cas['team1']} vs {cas['team2']}")
-        
+
         systeme = SystemePredictionUnifie(
-            cas['team1'], cas['team2'], cas['league'], 
+            cas['team1'], cas['team2'], cas['league'],
             cas['odds'], "Football"
         )
-        
+
         prediction = systeme.generer_prediction_unifiee()
-        print(f"   🎯 Prédiction: {prediction}")
+        print(f"   🎯 Décision collective: {prediction}")
+
+        # Montrer le processus de délibération
+        donnees = systeme._collecter_donnees_tous_systemes()
+        decision = systeme._deliberation_collective(donnees)
+        print(f"   📊 Consensus: {decision['type_decision']} ({decision['confiance_collective']}%)")
 
 if __name__ == "__main__":
     try:
