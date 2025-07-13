@@ -261,22 +261,25 @@ def detecter_contexte_pari(match_data):
 
 def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, contexte="match_complet"):
     """
-    Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping officiel et contexte.
+    Traduit le type de pari selon T, G et P (structure 1xbet) avec mapping canonique complet.
 
-    MAPPING OFFICIEL 1XBET :
-    ========================
-    Groupe 1 (1X2) : T=1→O1, T=2→Nul, T=3→O2
-    Groupe 2 (Handicap asiatique) : T=7→O1, T=8→O2
-    Groupe 8 (Handicap européen) : T=4-6→Dépend du handicap
-    Groupe 17 (Over/Under) : T=9/10→Total (aucune équipe)
+    STRUCTURE CANONIQUE 1XBET :
+    ===========================
+    Groupe 1 (1X2) : T=1→Victoire O1, T=2→Nul, T=3→Victoire O2
+    Groupe 2 (Handicap asiatique) : T=7→O1, T=8→O2 (avec P=handicap)
+    Groupe 8 (Handicap européen) : T=4→O1(-1), T=5→O1(+1), T=6→O2(0)
+    Groupe 17 (Over/Under) : T=9→Over, T=10→Under (avec P=seuil)
     Groupe 19 (Pair/Impair) : T=180→Pair, T=181→Impair
+    Groupe 62 (Corners) : T=14→Over corners, T=13→Under corners
 
-    CONTEXTES :
-    ===========
-    - match_complet : Paris sur le match entier
-    - première_mi_temps : Paris sur la 1ère mi-temps uniquement
-    - deuxième_mi_temps : Paris sur la 2ème mi-temps uniquement
-    - mi_temps : Paris sur une mi-temps (non spécifiée)
+    CHAMPS CONTEXTUELS :
+    ===================
+    - O1, O2 : Noms des équipes
+    - TN/TNS : Période ("Mi-temps", "Match entier", etc.)
+    - P : Paramètre (handicap, seuil, etc.)
+    - G : Groupe du marché
+    - T : Type de pari dans le groupe
+    - C : Cote
     """
 
     # Suffixe de contexte
@@ -308,18 +311,16 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, 
                 return f"Handicap asiatique ({param:+g}) - Type T{type_pari}{contexte_suffix}"
         return f"Handicap asiatique{contexte_suffix}"
 
-    # Groupe 8 - Handicap européen (MAPPING OFFICIEL)
+    # Groupe 8 - Handicap européen (MAPPING CANONIQUE)
     if groupe == 8:
-        if param is not None:
-            seuil = abs(float(param))
-            if type_pari in [4, 5, 6]:  # T=4-6 → Dépend du handicap fixé
-                if float(param) > 0:
-                    return f"Handicap européen {team1} (+{seuil}) - Avantage O1"
-                else:
-                    return f"Handicap européen {team2} (-{seuil}) - Désavantage O1"
-            else:
-                return f"Handicap européen ({param:+g}) - Type T{type_pari}"
-        return "Handicap européen"
+        if type_pari == 4:  # T=4 → Victoire Équipe 1 avec handicap -1
+            return f"Handicap européen {team1} (-1) - {team1} doit gagner par 2+ buts{contexte_suffix}"
+        elif type_pari == 5:  # T=5 → Victoire Équipe 1 avec +1
+            return f"Handicap européen {team1} (+1) - {team1} gagne ou nul{contexte_suffix}"
+        elif type_pari == 6:  # T=6 → Victoire Équipe 2 avec handicap 0
+            return f"Handicap européen {team2} (0) - {team2} gagne ou nul{contexte_suffix}"
+        else:
+            return f"Handicap européen - Type T{type_pari}{contexte_suffix}"
 
     # Groupe 17 - Over/Under (MAPPING OFFICIEL)
     if groupe == 17:
@@ -334,8 +335,20 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, 
                 return f"Total {seuil} buts - Type T{type_pari}{contexte_suffix}"
         return f"Over/Under (TOTAL){contexte_suffix}"
 
+    # Groupe 62 - Corners (MAPPING CANONIQUE)
+    if groupe == 62:
+        if param is not None:
+            seuil = abs(float(param))
+            if type_pari == 14:  # T=14 → Plus de X corners
+                return f"Plus de {seuil} corners{contexte_suffix}"
+            elif type_pari == 13:  # T=13 → Moins de X corners
+                return f"Moins de {seuil} corners{contexte_suffix}"
+            else:
+                return f"Total {seuil} corners - T{type_pari}{contexte_suffix}"
+        return f"Total corners{contexte_suffix}"
+
     # Autres groupes Over/Under possibles
-    if groupe in [62, 5, 12]:
+    if groupe in [5, 12]:
         if param is not None:
             seuil = abs(float(param))
             if type_pari == 9:
@@ -1298,6 +1311,12 @@ def generer_prediction_lisible(nom, valeur, team1, team2):
             return f"🔢 PAIR: {nom} (Résultat: 0, 2, 4, 6...)"
         else:
             return f"🔢 IMPAIR: {nom} (Résultat: 1, 3, 5, 7...)"
+    if "corners" in nom.lower():
+        return f"⚽ CORNERS: {nom}"
+    if "Handicap européen" in nom:
+        return f"🇪🇺 HANDICAP EU: {nom}"
+    if "mi-temps" in nom.lower() or "Mi-temps" in nom:
+        return f"⏰ MI-TEMPS: {nom}"
 
     return f"📋 AUTRE: {nom}"
 
