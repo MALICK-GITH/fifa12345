@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: fifa-prediction-system
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python fifa1.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 10000
