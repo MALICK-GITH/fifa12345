@@ -30,6 +30,22 @@ except ImportError:
     ALTERNATIFS_AVANCE_DISPONIBLE = False
     print("⚠️ Système alternatifs avancé non disponible")
 
+# Import des bots spécialisés et du maître
+try:
+    from bots_alternatifs import (
+        systeme_unifie_alternatifs_only,
+        systeme_ia_alternatifs_only,
+        systeme_probabilites_alternatifs_only,
+        systeme_value_betting_alternatifs_only,
+        systeme_statistique_alternatifs_only
+    )
+    from maitre_pronostics import MaitreDesPronostics
+    BOTS_ALTERNATIFS_DISPONIBLES = True
+    print("✅ Tous les bots alternatifs et le Maître des Pronostics chargés")
+except ImportError:
+    BOTS_ALTERNATIFS_DISPONIBLES = False
+    print("⚠️ Bots alternatifs non disponibles")
+
 # Import optionnel de numpy (désactivé pour Render)
 NUMPY_DISPONIBLE = False
 # Simulation des fonctions NumPy avec Python standard
@@ -652,17 +668,63 @@ def match_details(match_id):
             if not (('corner' in nom_lower) or ('pair' in nom_lower) or ('impair' in nom_lower)):
                 paris_alternatifs_filtres.append(p)
 
-        # Prédictions alternatives intelligentes (sans corners et pair/impair) avec données temps réel
-        prediction_alt = generer_predictions_alternatives(team1, team2, league, paris_alternatifs_filtres, odds_data, score1, score2, minute)
+        # 🎯 TRANSFORMATION COMPLÈTE - TOUS LES BOTS SPÉCIALISÉS PARIS ALTERNATIFS UNIQUEMENT
+        print(f"🎲 ACTIVATION DE TOUS LES BOTS POUR PARIS ALTERNATIFS UNIQUEMENT")
+        print(f"📊 {len(paris_alternatifs_filtres)} paris alternatifs détectés de l'API")
 
-        # 🎲 DÉTECTION D'OPPORTUNITÉS VALUE BETTING
-        value_bets = detecter_value_bets(paris_alternatifs_filtres, odds_data)
+        # 💰 FILTRAGE DES COTES ENTRE 1.399 ET 3.0
+        paris_cotes_valides = []
+        for p in paris_alternatifs_filtres:
+            try:
+                cote = float(p.get('cote', 0))
+                if 1.399 <= cote <= 3.0:
+                    paris_cotes_valides.append(p)
+            except:
+                continue
 
-        # 📈 ANALYSE D'ÉVOLUTION DES COTES
-        evolution_cotes = analyser_evolution_cotes_temps_reel(paris_alternatifs_filtres)
+        print(f"💰 {len(paris_cotes_valides)} paris avec cotes valides (1.399-3.0)")
 
-        # 🤖 IA PRÉDICTIVE MULTI-FACTEURS
-        ia_analyse = ia_prediction_multi_facteurs(team1, team2, league, odds_data, score1, score2, minute)
+        # 🎲 BOT 1: SYSTÈME UNIFIÉ ALTERNATIFS UNIQUEMENT
+        bot_unifie = systeme_unifie_alternatifs_only(team1, team2, league, paris_cotes_valides, score1, score2, minute)
+
+        # 🤖 BOT 2: IA SPÉCIALISÉE ALTERNATIFS UNIQUEMENT
+        bot_ia = systeme_ia_alternatifs_only(team1, team2, league, paris_cotes_valides, score1, score2, minute)
+
+        # 📊 BOT 3: PROBABILITÉS ALTERNATIVES UNIQUEMENT
+        bot_probabilites = systeme_probabilites_alternatifs_only(paris_cotes_valides, score1, score2, minute)
+
+        # 💰 BOT 4: VALUE BETTING ALTERNATIFS UNIQUEMENT
+        bot_value = systeme_value_betting_alternatifs_only(paris_cotes_valides, team1, team2, league)
+
+        # 📈 BOT 5: ANALYSE STATISTIQUE ALTERNATIFS UNIQUEMENT
+        bot_stats = systeme_statistique_alternatifs_only(paris_cotes_valides, team1, team2, league, score1, score2, minute)
+
+        # 🎯 MAÎTRE DES PRONOSTICS - DÉCISION FINALE
+        if BOTS_ALTERNATIFS_DISPONIBLES:
+            maitre = MaitreDesPronostics()
+
+            # Compilation des décisions de tous les bots
+            decisions_bots = {
+                'BOT_UNIFIE': bot_unifie,
+                'BOT_IA': bot_ia,
+                'BOT_PROBABILITES': bot_probabilites,
+                'BOT_VALUE': bot_value,
+                'BOT_STATS': bot_stats
+            }
+
+            # Décision finale du maître
+            contexte_maitre = {'score1': score1, 'score2': score2, 'minute': minute}
+            decision_maitre = maitre.analyser_decisions_bots(decisions_bots, team1, team2, league, contexte_maitre)
+
+            print(f"🎯 MAÎTRE DES PRONOSTICS - Décision: {decision_maitre.get('decision_finale', {}).get('action', 'AUCUNE')}")
+        else:
+            decision_maitre = {'decision_finale': {'action': 'BOTS NON DISPONIBLES'}}
+
+        # 🔄 COMPATIBILITÉ AVEC L'ANCIEN SYSTÈME
+        prediction_alt = bot_unifie
+        value_bets = bot_value.get('opportunities', [])
+        evolution_cotes = analyser_evolution_cotes_temps_reel(paris_cotes_valides)
+        ia_analyse = bot_ia
 
         # 🎲 SYSTÈME QUANTIQUE SPÉCIALISÉ PARIS ALTERNATIFS (si disponible)
         if QUANTIQUE_DISPONIBLE:
@@ -784,6 +846,41 @@ def match_details(match_id):
                 </div>
             </div>
         </div>"""
+
+        # HTML pour le Maître des Pronostics
+        maitre_html = ""
+        if 'decision_finale' in decision_maitre and decision_maitre['decision_finale'].get('action') != 'AUCUN_PARI':
+            decision_finale = decision_maitre['decision_finale']
+            analyse_bots = decision_maitre.get('analyse_bots', {})
+
+            maitre_html = f"""
+            <div style='background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); padding: 25px; border-radius: 15px; margin: 20px 0; color: white; box-shadow: 0 10px 30px rgba(255, 107, 107, 0.3);'>
+                <h3 style='margin: 0 0 20px 0; font-size: 20px; text-align: center;'>🎯 MAÎTRE DES PRONOSTICS</h3>
+                <div style='display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;'>
+                    <div style='text-align: center; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;'>
+                        <div style='font-size: 48px; font-weight: bold; margin-bottom: 10px;'>{decision_finale.get('confiance_numerique', 0)}%</div>
+                        <div style='font-size: 14px; opacity: 0.9;'>CONFIANCE MAÎTRE</div>
+                    </div>
+                    <div style='text-align: center; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;'>
+                        <div style='font-size: 20px; font-weight: bold; margin-bottom: 10px;'>{decision_finale.get('cote', 'N/A')}</div>
+                        <div style='font-size: 14px; opacity: 0.9;'>COTE CHOISIE</div>
+                    </div>
+                    <div style='text-align: center; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;'>
+                        <div style='font-size: 18px; font-weight: bold; margin-bottom: 10px;'>{analyse_bots.get('consensus', 'N/A')}</div>
+                        <div style='font-size: 14px; opacity: 0.9;'>CONSENSUS BOTS</div>
+                    </div>
+                </div>
+                <div style='background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; text-align: center; margin-bottom: 15px;'>
+                    <div style='font-size: 16px; font-weight: bold; margin-bottom: 5px;'>{decision_finale.get('pari_choisi', 'Aucun pari')}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>{decision_finale.get('type_pari', '')} | {decision_finale.get('niveau_confiance', '')}</div>
+                </div>
+                <div style='background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px; text-align: center;'>
+                    <strong>{decision_finale.get('action', '')}</strong>
+                </div>
+                <div style='margin-top: 15px; font-size: 12px; text-align: center; opacity: 0.8;'>
+                    🤖 {analyse_bots.get('nb_bots_consultes', 0)} Bots Consultés | 🤝 {analyse_bots.get('nb_bots_accord', 0)} Bots d'Accord | 🎲 Cotes 1.399-3.0
+                </div>
+            </div>"""
 
         # HTML pour le système quantique révolutionnaire
         pred_quantique = prediction_quantique['prediction_finale']
@@ -968,6 +1065,7 @@ def match_details(match_id):
                 <p><b>Score :</b> {score1} - {score2} | <b>Minute :</b> {minute}'</p>
 
                 {alliance_html}
+                {maitre_html}
                 {value_bets_html}
                 {evolution_html}
                 {ia_html}
