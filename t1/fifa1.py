@@ -230,31 +230,31 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
     if groupe == 2:
         if param is not None:
             if type_pari == 1 and team1:
-                return f"Handicap {team1} {param}"
+                return f"Handicap {team1} ({param}) - {team1} gagne avec avantage"
             elif type_pari == 2 and team2:
-                return f"Handicap {team2} {param}"
+                return f"Handicap {team2} ({param}) - {team2} gagne avec avantage"
             else:
-                return f"Handicap {param}"
+                return f"Handicap ({param})"
         return "Handicap"
     # Over/Under (souvent G8 ou G17 ou G62)
     if groupe in [8, 17, 62]:
         if param is not None:
             seuil = abs(float(param))
             if type_pari in [9]:  # T=9 = Over (Plus de)
-                return f"Plus de {seuil} buts"
+                return f"Plus de {seuil} buts (TOTAL du match)"
             elif type_pari in [10]:  # T=10 = Under (Moins de)
-                return f"Moins de {seuil} buts"
+                return f"Moins de {seuil} buts (TOTAL du match)"
             # fallback si on ne sait pas
             if float(param) > 0:
-                return f"Plus de {seuil} buts"
+                return f"Plus de {seuil} buts (TOTAL du match)"
             else:
-                return f"Moins de {seuil} buts"
-        return "Plus/Moins de buts"
+                return f"Moins de {seuil} buts (TOTAL du match)"
+        return "Plus/Moins de buts (TOTAL du match)"
     # Score exact
     if groupe == 15:
         if param is not None:
-            return f"Score exact {param}"
-        return "Score exact"
+            return f"Score exact {param} ({team1} vs {team2})"
+        return f"Score exact ({team1} vs {team2})"
     # Double chance
     if groupe == 3:
         if type_pari == 1 and team1 and team2:
@@ -266,7 +266,11 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
         return "Double chance"
     # Nombre de buts
     if groupe in [19, 180, 181]:
-        return "Nombre de buts"
+        if type_pari == 1 and team1:
+            return f"Nombre de buts marqués par {team1}"
+        elif type_pari == 2 and team2:
+            return f"Nombre de buts marqués par {team2}"
+        return "Nombre de buts (TOTAL du match)"
     # Ajoute d'autres mappings selon tes observations
     return f"Pari spécial (G{groupe} T{type_pari})"
 
@@ -574,23 +578,26 @@ TEMPLATE = """<!DOCTYPE html>
 
 def generer_prediction_lisible(nom, valeur, team1, team2):
     """Génère une phrase prédictive claire pour chaque pari, en précisant l'équipe si besoin."""
+    # Prédictions déjà claires avec les nouvelles améliorations
+    if "TOTAL du match" in nom:
+        return f"✅ RECOMMANDÉ: {nom}"
     if nom.startswith("Victoire "):
-        return f"{nom}"
+        return f"🏆 {nom} - Pari sur le vainqueur"
     if nom.startswith("Handicap "):
-        return f"{nom}"
+        return f"⚖️ {nom}"
     if nom.startswith("Plus de") or nom.startswith("Moins de"):
-        return f"{nom}"
+        return f"⚽ {nom}"
     if nom.startswith("Score exact"):
-        return f"{nom}"
+        return f"🎯 {nom} - Pari risqué mais lucratif"
     if nom.startswith("Double chance"):
-        return f"{nom}"
+        return f"🛡️ {nom} - Pari sécurisé"
     if nom.startswith("Nombre de buts"):
-        return f"{nom}"
+        return f"📊 {nom}"
     if team1 and team1 in nom:
-        return f"{nom} ({team1})"
+        return f"🔵 {nom}"
     if team2 and team2 in nom:
-        return f"{nom} ({team2})"
-    return nom
+        return f"🔴 {nom}"
+    return f"📋 {nom}"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
