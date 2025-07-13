@@ -1186,10 +1186,14 @@ def fetch_and_process_matches_background():
             with app.app_context():
                 print("🔄 Récupération automatique des matchs...")
 
-                # Récupérer les données de l'API
-                url = "https://1xbet.whoscored.com/v1/events"
+                # Récupérer les données de l'API avec la bonne URL
+                url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=60&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
                 headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+                    'Referer': 'https://1xbet.com/',
+                    'Origin': 'https://1xbet.com'
                 }
 
                 response = requests.get(url, headers=headers, timeout=30)
@@ -1200,9 +1204,9 @@ def fetch_and_process_matches_background():
                     processed_count = 0
                     for match in api_data.get("Value", []):
                         try:
-                            # Extraire les données du match
-                            team1 = match.get("O1E", "Équipe 1")
-                            team2 = match.get("O2E", "Équipe 2")
+                            # Extraire les données du match avec les bons champs
+                            team1 = match.get("O1", "Équipe 1")
+                            team2 = match.get("O2", "Équipe 2")
                             score1 = match.get("SC", {}).get("FS", {}).get("S1", 0) or 0
                             score2 = match.get("SC", {}).get("FS", {}).get("S2", 0) or 0
 
@@ -1265,7 +1269,11 @@ def fetch_and_process_matches_background():
                     print(f"✅ {processed_count} matchs traités automatiquement")
 
                 else:
-                    print(f"❌ Erreur API: {response.status_code}")
+                    if response.status_code == 403:
+                        print(f"⚠️ API bloquée (403) - Attente plus longue...")
+                        time.sleep(300)  # Attendre 5 minutes si bloqué
+                    else:
+                        print(f"❌ Erreur API: {response.status_code}")
 
         except Exception as e:
             print(f"❌ Erreur récupération automatique: {e}")
@@ -1919,6 +1927,101 @@ def test_performance():
     except Exception as e:
         return f"Erreur: {str(e)}"
 
+@app.route('/leagues_overview')
+def leagues_overview():
+    """Page d'aperçu des ligues disponibles"""
+    try:
+        # Récupérer les données de l'API
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=200&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        response = requests.get(api_url, timeout=10)
+        matches = response.json().get("Value", [])
+
+        # Analyser les ligues
+        leagues_count = {}
+        for match in matches:
+            league = match.get("LE", "–")
+            if league in leagues_count:
+                leagues_count[league] += 1
+            else:
+                leagues_count[league] = 1
+
+        # Trier par nombre de matchs
+        leagues_sorted = sorted(leagues_count.items(), key=lambda x: x[1], reverse=True)
+
+        # Générer HTML
+        html = f"""
+        <!DOCTYPE html>
+        <html><head>
+            <title>Aperçu des Ligues</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }}
+                .container {{ max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; }}
+                .header {{ text-align: center; margin-bottom: 30px; }}
+                .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }}
+                .stat-card {{ background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 20px; border-radius: 10px; text-align: center; }}
+                .leagues-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }}
+                .league-card {{ background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; }}
+                .league-name {{ font-weight: bold; color: #495057; margin-bottom: 5px; }}
+                .league-matches {{ color: #6c757d; font-size: 14px; }}
+                .back-link {{ display: inline-block; margin-bottom: 20px; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; }}
+            </style>
+        </head><body>
+            <div class="container">
+                <a href="/" class="back-link">← Retour aux matchs</a>
+
+                <div class="header">
+                    <h1>📊 Aperçu des Ligues Disponibles</h1>
+                    <p>Analyse en temps réel des ligues et championnats</p>
+                </div>
+
+                <div class="stats">
+                    <div class="stat-card">
+                        <h3>{len(matches)}</h3>
+                        <p>Matchs Total</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{len(leagues_count)}</h3>
+                        <p>Ligues Différentes</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{leagues_sorted[0][1] if leagues_sorted else 0}</h3>
+                        <p>Max Matchs/Ligue</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{len([l for l, c in leagues_count.items() if c >= 5])}</h3>
+                        <p>Ligues Actives (5+ matchs)</p>
+                    </div>
+                </div>
+
+                <h2>🏆 Toutes les Ligues ({len(leagues_count)})</h2>
+                <div class="leagues-grid">
+        """
+
+        for i, (league, count) in enumerate(leagues_sorted):
+            percentage = (count / len(matches)) * 100
+            html += f"""
+                    <div class="league-card">
+                        <div class="league-name">#{i+1} {league}</div>
+                        <div class="league-matches">{count} matchs ({percentage:.1f}%)</div>
+                    </div>
+            """
+
+        html += """
+                </div>
+
+                <div style="margin-top: 30px; text-align: center; color: #6c757d;">
+                    <p>Données mises à jour en temps réel depuis l'API 1xBet</p>
+                    <p><a href="/debug_leagues">Voir les données JSON détaillées</a></p>
+                </div>
+            </div>
+        </body></html>
+        """
+
+        return html
+
+    except Exception as e:
+        return f"Erreur: {str(e)}"
+
 @app.route('/match_by_external/<external_id>')
 def match_details_by_external(external_id):
     """Affiche les détails d'un match par son external_id"""
@@ -2052,35 +2155,71 @@ def home():
         selected_league = request.args.get("league", "").strip()
         selected_status = request.args.get("status", "").strip()
 
-        # Récupérer suffisamment de matchs pour la pagination
-        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=100&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        # Récupérer plus de matchs pour voir toutes les ligues
+        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=80&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
 
         print(f"⏱️ Début requête API...")
         api_start = time.time()
-        response = requests.get(api_url, timeout=10)  # Timeout pour éviter les blocages
+
+        # Headers pour contourner les restrictions géographiques
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+            'Referer': 'https://1xbet.com/',
+            'Origin': 'https://1xbet.com',
+            'X-Forwarded-For': '185.220.101.1',  # IP européenne
+            'X-Real-IP': '185.220.101.1',
+            'CF-Connecting-IP': '185.220.101.1'
+        }
+
+        response = requests.get(api_url, headers=headers, timeout=10)
         matches = response.json().get("Value", [])
         api_time = time.time() - api_start
         print(f"⏱️ API récupérée en {api_time:.2f}s - {len(matches)} matchs")
 
         sports_detected = set()
         leagues_detected = set()
+        leagues_count = {}  # Pour équilibrer les ligues
         data = []
 
         print(f"⏱️ Début traitement {len(matches)} matchs...")
         processing_start = time.time()
 
-        # Traiter tous les matchs mais de manière optimisée
+        # Traiter les matchs avec sélection intelligente pour la diversité
+        max_total_matches = 60  # Augmenté pour voir plus de ligues
+        processed_count = 0
+
         for i, match in enumerate(matches):
-            # Afficher le progrès tous les 20 matchs
-            if i % 20 == 0:
+            # Arrêter si on a assez de matchs
+            if processed_count >= max_total_matches:
+                print(f"⏱️ Limite atteinte: {processed_count} matchs traités")
+                break
+            # Afficher le progrès tous les 15 matchs
+            if i % 15 == 0:
                 print(f"⏱️ Traitement match {i+1}/{len(matches)}")
             try:
                 league = match.get("LE", "–")
+
+                # Logique de limitation intelligente par type de ligue
+                max_per_league = 2  # Par défaut
+                if "penalty" in league.lower():
+                    max_per_league = 8  # Plus pour les penalties (4 versions FIFA)
+                elif "championship" in league.lower():
+                    max_per_league = 3  # Moyennement pour les championnats
+                elif "league" in league.lower():
+                    max_per_league = 3  # Moyennement pour les ligues
+
+                # Limiter selon le type de ligue
+                if leagues_count.get(league, 0) >= max_per_league:
+                    continue
+
                 team1 = match.get("O1", "–")
                 team2 = match.get("O2", "–")
                 sport = detect_sport(league).strip()
                 sports_detected.add(sport)
                 leagues_detected.add(league)
+                leagues_count[league] = leagues_count.get(league, 0) + 1
 
                 # --- Logos supprimés pour optimisation ---
                 # Plus d'extraction de logos pour améliorer les performances
@@ -2140,23 +2279,52 @@ def home():
                 match_ts = match.get("S", 0)
                 match_time = datetime.utcfromtimestamp(match_ts).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
 
-                # --- Extraction RAPIDE des cotes 1X2 SEULEMENT pour page principale ---
+                # --- Extraction COMPLÈTE des cotes pour page principale ET détails ---
                 main_odds = {}
+                all_alternative_odds = {}
 
                 # 1. Chercher dans E (cotes principales)
                 for o in match.get("E", []):
                     if o.get("G") == 1 and o.get("T") in [1, 2, 3] and o.get("C") is not None:
                         main_odds[{1: "1", 2: "2", 3: "X"}[o.get("T")]] = o.get("C")
 
-                # 2. Si pas trouvé, chercher dans AE (alternatives)
-                if len(main_odds) < 3:
-                    for ae in match.get("AE", []):
-                        if ae.get("G") == 1:
-                            for o in ae.get("ME", []):
-                                if o.get("T") in [1, 2, 3] and o.get("C") is not None:
-                                    key = {1: "1", 2: "2", 3: "X"}[o.get("T")]
-                                    if key not in main_odds:
-                                        main_odds[key] = o.get("C")
+                # 2. Extraire TOUTES les cotes alternatives (AE)
+                for ae in match.get("AE", []):
+                    group = ae.get("G", 0)
+                    for o in ae.get("ME", []):
+                        bet_type = o.get("T")
+                        cote = o.get("C")
+                        param = o.get("P")
+
+                        if cote is not None:
+                            # Cotes 1X2 si manquantes
+                            if group == 1 and bet_type in [1, 2, 3]:
+                                key = {1: "1", 2: "2", 3: "X"}[bet_type]
+                                if key not in main_odds:
+                                    main_odds[key] = cote
+
+                            # Cotes Over/Under
+                            elif group == 2:  # Total buts
+                                if param == 1.5:
+                                    if bet_type == 7: all_alternative_odds["Over 1.5"] = cote
+                                    elif bet_type == 8: all_alternative_odds["Under 1.5"] = cote
+                                elif param == 2.5:
+                                    if bet_type == 7: all_alternative_odds["Over 2.5"] = cote
+                                    elif bet_type == 8: all_alternative_odds["Under 2.5"] = cote
+                                elif param == 3.5:
+                                    if bet_type == 7: all_alternative_odds["Over 3.5"] = cote
+                                    elif bet_type == 8: all_alternative_odds["Under 3.5"] = cote
+
+                            # BTTS (Both Teams to Score)
+                            elif group == 3:
+                                if bet_type == 9: all_alternative_odds["BTTS Oui"] = cote
+                                elif bet_type == 10: all_alternative_odds["BTTS Non"] = cote
+
+                            # Double Chance
+                            elif group == 4:
+                                if bet_type == 4: all_alternative_odds["1X"] = cote
+                                elif bet_type == 5: all_alternative_odds["12"] = cote
+                                elif bet_type == 6: all_alternative_odds["X2"] = cote
 
                 # Formater pour affichage
                 if main_odds:
@@ -2196,7 +2364,7 @@ def home():
                     "temp": temp,
                     "humid": humid,
                     "odds": formatted_odds,  # Seulement 1X2 pour affichage
-                    "all_odds": main_odds,   # Cotes principales pour les prédictions
+                    "all_odds": {**main_odds, **all_alternative_odds},   # TOUTES les cotes pour les détails
                     "prediction": prediction,
                     "id": match.get("I", None)
                 }
@@ -2243,9 +2411,17 @@ def home():
                         print(f"⚠️ Erreur critique sauvegarde: {e}")
                     match_data["id"] = None
 
-                # Sauvegarder l'évolution du match avec les cotes actuelles
-                if saved_match and formatted_odds:
-                    save_match_evolution(saved_match, formatted_odds, statut, minute)
+                # Sauvegarder l'évolution du match avec TOUTES les cotes
+                if saved_match:
+                    # Créer la liste complète des cotes pour la sauvegarde
+                    all_odds_for_save = []
+                    for bet_type, cote in main_odds.items():
+                        all_odds_for_save.append(f"{bet_type}: {cote}")
+                    for bet_type, cote in all_alternative_odds.items():
+                        all_odds_for_save.append(f"{bet_type}: {cote}")
+
+                    if all_odds_for_save:
+                        save_match_evolution(saved_match, all_odds_for_save, statut, minute)
 
                 # Vérifier s'il faut faire un auto-training
                 if saved_match and statut == "Terminé":
@@ -2253,13 +2429,22 @@ def home():
                     threading.Thread(target=check_and_auto_train, daemon=True).start()
 
                 data.append(match_data)
+                processed_count += 1  # Incrémenter le compteur
             except Exception as e:
                 print(f"Erreur lors du traitement d'un match: {e}")
                 continue
 
-        # Logs de performance
+        # Logs de performance et debug ligues
         total_time = time.time() - start_time
         print(f"⏱️ Page principale générée en {total_time:.2f}s - {len(data)} matchs traités")
+
+        # Debug: afficher les ligues trouvées
+        penalty_leagues = [l for l in leagues_detected if "penalty" in l.lower()]
+        print(f"🎯 Ligues Penalty trouvées: {penalty_leagues}")
+        print(f"📊 Total ligues détectées: {len(leagues_detected)}")
+        for league, count in leagues_count.items():
+            if "penalty" in league.lower():
+                print(f"   • {league}: {count} matchs")
 
         # Filtrage optimisé
         if selected_sport:
@@ -2276,7 +2461,7 @@ def home():
             page = int(request.args.get('page', 1))
         except:
             page = 1
-        per_page = 25  # Augmenté pour moins de pages
+        per_page = 12  # Optimisé pour la vitesse - moins de matchs par page
         total = len(data)
         total_pages = (total + per_page - 1) // per_page
         data_paginated = data[(page-1)*per_page:page*per_page]
