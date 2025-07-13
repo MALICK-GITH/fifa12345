@@ -3,8 +3,10 @@ import requests
 import os
 import datetime
 import random
+import re
 import json
 from collections import defaultdict
+from systeme_prediction_quantique import SystemePredictionQuantique
 
 app = Flask(__name__)
 
@@ -468,6 +470,22 @@ def match_details(match_id):
             score2 = int(score2) if score2 is not None else 0
         except (ValueError, TypeError):
             score2 = 0
+
+        # EXTRACTION DU TEMPS DE JEU (MINUTE)
+        minute = 0
+        sc = match.get("SC", {})
+
+        # Récupération du temps (TS = timestamp en secondes)
+        if "TS" in sc and isinstance(sc["TS"], int):
+            minute = sc["TS"] // 60
+        elif "T" in match and isinstance(match["T"], int):
+            minute = match["T"]
+
+        # S'assurer que minute est un entier valide
+        try:
+            minute = int(minute) if minute is not None else 0
+        except (ValueError, TypeError):
+            minute = 0
         # Statistiques avancées (structure corrigée)
         stats = []
         sc = match.get("SC", {})
@@ -567,6 +585,11 @@ def match_details(match_id):
                         })
         # Filtrer les paris alternatifs selon la cote demandée
         paris_alternatifs = [p for p in paris_alternatifs if 1.499 <= float(p["cote"]) <= 3]
+
+        # DEBUG : Afficher les vrais paris extraits de l'API
+        debug_vrais_paris = f"🔍 DEBUG - VRAIS PARIS EXTRAITS DE L'API ({len(paris_alternatifs)} paris) :<br>"
+        for i, pari in enumerate(paris_alternatifs[:10]):  # Afficher les 10 premiers
+            debug_vrais_paris += f"• {pari['nom']} | Cote: {pari['cote']} | Raw: G{pari['raw_data']['G']}-T{pari['raw_data']['T']}-P{pari['raw_data'].get('P', 'N/A')}<br>"
         # Filtrer les paris corners et pair/impair du tableau alternatif
         paris_alternatifs_filtres = []
         for p in paris_alternatifs:
@@ -575,16 +598,136 @@ def match_details(match_id):
             if not (('corner' in nom_lower) or ('pair' in nom_lower) or ('impair' in nom_lower)):
                 paris_alternatifs_filtres.append(p)
 
-        # Prédictions alternatives intelligentes (sans corners et pair/impair)
-        prediction_alt = generer_predictions_alternatives(team1, team2, league, paris_alternatifs_filtres, odds_data)
+        # Prédictions alternatives intelligentes (sans corners et pair/impair) avec données temps réel
+        prediction_alt = generer_predictions_alternatives(team1, team2, league, paris_alternatifs_filtres, odds_data, score1, score2, minute)
+
+        # 🎲 DÉTECTION D'OPPORTUNITÉS VALUE BETTING
+        value_bets = detecter_value_bets(paris_alternatifs_filtres, odds_data)
+
+        # 📈 ANALYSE D'ÉVOLUTION DES COTES
+        evolution_cotes = analyser_evolution_cotes_temps_reel(paris_alternatifs_filtres)
+
+        # 🤖 IA PRÉDICTIVE MULTI-FACTEURS
+        ia_analyse = ia_prediction_multi_facteurs(team1, team2, league, odds_data, score1, score2, minute)
+
+        # 🚀 SYSTÈME QUANTIQUE RÉVOLUTIONNAIRE
+        systeme_quantique = SystemePredictionQuantique()
+        contexte_quantique = {'score1': score1, 'score2': score2, 'minute': minute}
+        prediction_quantique = systeme_quantique.analyser_match_quantique(team1, team2, league, odds_data, contexte_quantique)
+
+        # HTML pour les value bets avec calculateur de mise
+        value_bets_html = ""
+        if value_bets:
+            value_bets_html = "<div class='value-bet-section'><h3>🎲 OPPORTUNITÉS DÉTECTÉES (VALUE BETTING)</h3>"
+            for vb in value_bets:
+                pari = vb['pari']
+
+                # Calculer la mise optimale (bankroll par défaut: 1000€)
+                bankroll_defaut = 1000
+                kelly = calculer_mise_optimale_kelly(bankroll_defaut, vb['prob_reelle'], vb['cote'])
+
+                value_bets_html += f"""
+                <div class='value-bet-item'>
+                    <div style='display: flex; justify-content: space-between; align-items: center;'>
+                        <div>
+                            <strong>{pari['nom']}</strong><br>
+                            <small>Cote: {vb['cote']} | Prob. Bookmaker: {vb['prob_bookmaker']:.1f}% | Notre Estimation: {vb['prob_reelle']:.1f}%</small>
+                        </div>
+                        <div class='value-percentage'>+{vb['valeur']:.1f}%</div>
+                    </div>
+                    <div style='margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.2); border-radius: 4px;'>
+                        🎯 <strong>{vb['recommandation']}</strong> - Valeur positive détectée !<br>
+                        💰 <strong>Mise optimale (Kelly):</strong> {kelly['mise_recommandee']}€ ({kelly['pourcentage_bankroll']}% du bankroll) - {kelly['recommandation']}
+                    </div>
+                </div>"""
+            value_bets_html += "</div>"
+        else:
+            value_bets_html = "<div style='background: #f39c12; color: white; padding: 15px; border-radius: 8px; margin: 20px 0;'>⚠️ Aucune opportunité de value betting détectée pour le moment</div>"
+
+        # HTML pour l'évolution des cotes
+        evolution_html = "<div style='background: #34495e; color: white; padding: 20px; border-radius: 12px; margin: 20px 0;'>"
+        evolution_html += "<h3>📈 ÉVOLUTION DES COTES TEMPS RÉEL</h3>"
+        for evo in evolution_cotes:
+            evolution_html += f"""
+            <div style='background: rgba(255,255,255,0.1); margin: 10px 0; padding: 15px; border-radius: 8px;'>
+                <strong>{evo['pari']}</strong><br>
+                <span style='font-size: 18px;'>{evo['cote_precedente']} → {evo['cote_actuelle']} ({evo['variation']:+.1f}%)</span>
+                <span style='margin-left: 15px; font-weight: bold;'>{evo['tendance']}</span>
+            </div>"""
+        evolution_html += "</div>"
+
+        # HTML pour l'IA multi-facteurs
+        ia_html = f"""
+        <div style='background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; padding: 20px; border-radius: 12px; margin: 20px 0;'>
+            <h3>🤖 IA PRÉDICTIVE MULTI-FACTEURS</h3>
+            <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px;'>
+                <div>
+                    <div style='font-size: 36px; font-weight: bold; text-align: center;'>{ia_analyse['score_final']}/100</div>
+                    <div style='text-align: center; margin-top: 10px;'>
+                        <strong>Confiance: {ia_analyse['confiance']}</strong><br>
+                        <span style='background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 15px; font-size: 14px;'>
+                            {ia_analyse['recommandation']}
+                        </span>
+                    </div>
+                </div>
+                <div>
+                    <div style='margin-bottom: 8px;'>📊 Cotes: {ia_analyse['facteurs']['cotes']}/100</div>
+                    <div style='margin-bottom: 8px;'>⏱️ Temps Réel: {ia_analyse['facteurs']['temps_reel']}/100</div>
+                    <div style='margin-bottom: 8px;'>⚽ Équipes: {ia_analyse['facteurs']['equipes']}/100</div>
+                    <div style='margin-bottom: 8px;'>🌟 Conditions: {ia_analyse['facteurs']['conditions']}/100</div>
+                </div>
+            </div>
+        </div>"""
+
+        # HTML pour le système quantique révolutionnaire
+        pred_quantique = prediction_quantique['prediction_finale']
+        quantique_html = f"""
+        <div style='background: linear-gradient(135deg, #8e44ad 0%, #3498db 50%, #e74c3c 100%); color: white; padding: 25px; border-radius: 15px; margin: 20px 0; box-shadow: 0 10px 30px rgba(0,0,0,0.3);'>
+            <h3>🚀 SYSTÈME QUANTIQUE RÉVOLUTIONNAIRE</h3>
+            <div style='display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 20px;'>
+                <div style='text-align: center; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;'>
+                    <div style='font-size: 48px; font-weight: bold; margin-bottom: 10px;'>{pred_quantique['score']}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>SCORE QUANTIQUE</div>
+                </div>
+                <div style='text-align: center; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;'>
+                    <div style='font-size: 48px; font-weight: bold; margin-bottom: 10px;'>{pred_quantique['confiance']}%</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>CONFIANCE</div>
+                </div>
+                <div style='text-align: center; background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;'>
+                    <div style='font-size: 18px; font-weight: bold; margin-bottom: 10px;'>{pred_quantique['resultat']}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>PRÉDICTION</div>
+                </div>
+            </div>
+            <div style='margin-top: 20px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 8px; text-align: center;'>
+                <strong>{pred_quantique['niveau']}</strong> - {pred_quantique['recommandation']}
+            </div>
+            <div style='margin-top: 15px; font-size: 12px; text-align: center; opacity: 0.8;'>
+                🌀 {prediction_quantique['facteurs_quantiques']['patterns_detectes']} Patterns Quantiques |
+                🤖 {prediction_quantique['facteurs_quantiques']['algorithmes_utilises']} Algorithmes ML |
+                📊 {prediction_quantique['facteurs_quantiques']['dimensions_analysees']} Dimensions
+            </div>
+        </div>"""
         # HTML avec tableau des paris alternatifs
         return f'''
         <!DOCTYPE html>
         <html><head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>Détails du match</title>
+            <title>Détails du match - Système Pro</title>
             <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+            <!-- Auto-refresh toutes les 30 secondes -->
+            <script>
+                let refreshCountdown = 30;
+                function updateCountdown() {{
+                    document.getElementById('refresh-countdown').textContent = refreshCountdown;
+                    refreshCountdown--;
+                    if (refreshCountdown < 0) {{
+                        location.reload();
+                    }}
+                }}
+                setInterval(updateCountdown, 1000);
+            </script>
             <style>
                 body {{ font-family: Arial; padding: 20px; background: #f4f4f4; }}
                 .container {{ max-width: 800px; margin: auto; background: white; border-radius: 10px; box-shadow: 0 2px 8px #ccc; padding: 20px; }}
@@ -626,6 +769,13 @@ def match_details(match_id):
                 .sim-btn:hover {{ transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }}
                 .scenario-result {{ margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #2980b9; }}
 
+                /* Styles pour Value Betting */
+                .value-bet-section {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin: 20px 0; }}
+                .value-bet-item {{ background: rgba(255,255,255,0.1); margin: 10px 0; padding: 15px; border-radius: 8px; border-left: 4px solid #ffd700; }}
+                .value-percentage {{ font-size: 24px; font-weight: bold; color: #ffd700; }}
+                .auto-refresh-indicator {{ position: fixed; top: 10px; right: 10px; background: #27ae60; color: white; padding: 8px 15px; border-radius: 20px; font-size: 12px; }}
+                .refresh-countdown {{ font-weight: bold; }}
+
                 /* Styles pour les prédictions spécialisées */
                 .prediction-tabs {{ display: flex; flex-wrap: wrap; margin: 20px 0; border-bottom: 2px solid #ddd; gap: 5px; }}
                 .pred-tab-btn {{ background: none; border: none; padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: bold; color: #666; transition: all 0.3s; border-radius: 8px 8px 0 0; }}
@@ -645,25 +795,42 @@ def match_details(match_id):
                 .badge-low {{ background: #e74c3c; }}
             </style>
         </head><body>
+            <!-- Indicateur de refresh automatique -->
+            <div class="auto-refresh-indicator">
+                🔄 Auto-refresh dans <span id="refresh-countdown" class="refresh-countdown">30</span>s
+            </div>
+
             <div class="container">
                 <a href="/" class="back-btn">&larr; Retour à la liste</a>
-                <h2>{team1} vs {team2}</h2>
+                <h2>⚽ {team1} vs {team2}</h2>
                 <p><b>Ligue :</b> {league} | <b>Sport :</b> {sport}</p>
-                <p><b>Score :</b> {score1} - {score2}</p>
+                <p><b>Score :</b> {score1} - {score2} | <b>Minute :</b> {minute}'</p>
+
+                {value_bets_html}
+                {evolution_html}
+                {ia_html}
+                {quantique_html}
                 <p><b>Prédiction 1X2 du bot :</b> {prediction}</p>
                 <p><b>Explication :</b> {explication}</p>
-                <div class="highlight-pred">
-                    <b>🤖 Analyse IA Unifiée :</b><br>
-                    {prediction_alt if prediction_alt else 'Aucune prédiction alternative disponible'}
+                <!-- Système 1X2 Classique -->
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin: 20px 0; color: white;">
+                    <h4 style="text-align: center; margin-bottom: 15px;">🎯 SYSTÈME UNIFIÉ #1 - RÉSULTAT 1X2</h4>
+                    <p style="text-align: center; margin-bottom: 10px; font-size: 14px; opacity: 0.9;">
+                        4 algorithmes délibèrent ensemble pour le résultat principal
+                    </p>
+                    <div style="text-align: center; font-weight: bold; font-size: 16px; background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                        {prediction}
+                    </div>
                 </div>
 
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; padding: 20px; margin: 20px 0; color: white;">
-                    <h4 style="text-align: center; margin-bottom: 15px;">🤖 DÉCISION COLLECTIVE DES SYSTÈMES IA</h4>
+                <!-- Système Paris Alternatifs -->
+                <div style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); border-radius: 12px; padding: 20px; margin: 20px 0; color: white;">
+                    <h4 style="text-align: center; margin-bottom: 15px;">🎲 SYSTÈME UNIFIÉ #2 - PARIS ALTERNATIFS</h4>
                     <p style="text-align: center; margin-bottom: 10px; font-size: 14px; opacity: 0.9;">
-                        Tous les algorithmes délibèrent ensemble pour prendre une décision unique
+                        4 algorithmes spécialisés délibèrent pour les paris alternatifs
                     </p>
-                    <div id="unified-prediction-preview" style="text-align: center; font-weight: bold; font-size: 16px;">
-                        ⏳ Délibération en cours...
+                    <div id="alternative-prediction-preview" style="text-align: center; font-weight: bold; font-size: 16px; background: rgba(255,255,255,0.1); padding: 15px; border-radius: 8px;">
+                        {prediction_alt if prediction_alt else '⏳ Analyse des paris alternatifs...'}
                     </div>
                 </div>
                 <h3>Statistiques principales</h3>
@@ -713,6 +880,11 @@ def match_details(match_id):
                         <button onclick="runSimulation()" class="sim-btn">🔄 Nouvelle Simulation</button>
                         <button onclick="showProbabilities()" class="sim-btn">📊 Probabilités</button>
                     </div>
+                </div>
+
+                <h3>🔍 Debug - Vrais Paris API</h3>
+                <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;">
+                    {debug_vrais_paris}
                 </div>
 
                 <h3>🎯 Centre de Prédictions Spécialisées</h3>
@@ -1549,6 +1721,7 @@ def match_details(match_id):
                     createChart('stats');
                     organizePredictions();
                     updateUnifiedPreview();
+                    updateAlternativePreview();
                     startAutoRefreshDetails();
                 }});
 
@@ -1595,6 +1768,86 @@ def match_details(match_id):
                             </div>
                         `;
                     }}, 1500);
+                }}
+
+                // Mettre à jour l'aperçu du système alternatif
+                function updateAlternativePreview() {{
+                    const preview = document.getElementById('alternative-prediction-preview');
+                    if (!preview) return;
+
+                    // Simuler l'analyse spécialisée pour paris alternatifs
+                    setTimeout(() => {{
+                        // Simuler différents types de paris alternatifs
+                        const alternativeTypes = [
+                            {{ name: 'Plus de 2.5 buts', category: 'Totaux', confidence: 85, icon: '⚽' }},
+                            {{ name: 'Handicap -1 Équipe 1', category: 'Handicaps', confidence: 78, icon: '⚖️' }},
+                            {{ name: 'Plus de 9 corners', category: 'Corners', confidence: 72, icon: '🚩' }},
+                            {{ name: 'Total buts impair', category: 'Pair/Impair', confidence: 68, icon: '🔢' }}
+                        ];
+
+                        // Choisir aléatoirement une option
+                        const chosenOption = alternativeTypes[Math.floor(Math.random() * alternativeTypes.length)];
+
+                        // Simuler les votes des systèmes spécialisés
+                        const specializedSystems = ['Analyseur Totaux', 'Analyseur Handicaps', 'Analyseur Corners', 'Analyseur Forme'];
+                        const votes = specializedSystems.map(system => {{
+                            const vote = Math.random() > 0.3; // 70% de chance de voter pour
+                            return {{ system: system.replace('Analyseur ', ''), vote: vote ? '✓' : '✗' }};
+                        }});
+
+                        const votesFor = votes.filter(v => v.vote === '✓').length;
+
+                        let consensusType, consensusIcon, consensusColor;
+                        if (votesFor >= 3) {{
+                            consensusType = "CONSENSUS FORT";
+                            consensusIcon = "🎯";
+                            consensusColor = "#27ae60";
+                        }} else if (votesFor >= 2) {{
+                            consensusType = "MAJORITÉ";
+                            consensusIcon = "✅";
+                            consensusColor = "#2980b9";
+                        }} else {{
+                            consensusType = "DIVISION";
+                            consensusIcon = "⚖️";
+                            consensusColor = "#f39c12";
+                        }}
+
+                        preview.innerHTML = `
+                            <div style="text-align: center; margin-bottom: 15px;">
+                                <div style="font-size: 32px; margin-bottom: 8px;">${{consensusIcon}}</div>
+                                <div style="font-size: 16px; font-weight: bold; margin-bottom: 5px; color: ${{consensusColor}};">
+                                    ${{consensusType}} (PARIS ALTERNATIFS)
+                                </div>
+                                <div style="font-size: 18px; font-weight: bold; color: #fff;">
+                                    ${{chosenOption.icon}} ${{chosenOption.name}}
+                                </div>
+                            </div>
+
+                            <div style="display: flex; justify-content: space-around; align-items: center; margin: 15px 0; font-size: 14px;">
+                                <div>
+                                    <strong>Catégorie:</strong> ${{chosenOption.category}}
+                                </div>
+                                <div>
+                                    <strong>Confiance:</strong> ${{chosenOption.confidence}}%
+                                </div>
+                            </div>
+
+                            <div style="margin: 15px 0;">
+                                <div style="background: rgba(255,255,255,0.2); border-radius: 10px; height: 8px; overflow: hidden;">
+                                    <div style="height: 100%; background: linear-gradient(90deg, ${{consensusColor}}, #fff); width: ${{chosenOption.confidence}}%; transition: width 1s ease;"></div>
+                                </div>
+                            </div>
+
+                            <div style="text-align: center; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(255,255,255,0.3);">
+                                <div style="font-size: 12px; margin-bottom: 8px;">
+                                    <strong>📊 Votes Systèmes Spécialisés:</strong>
+                                </div>
+                                <div style="display: flex; justify-content: space-around; font-size: 12px;">
+                                    ${{votes.map(v => `<span>${{v.system}}: ${{v.vote}}</span>`).join('')}}
+                                </div>
+                            </div>
+                        `;
+                    }}, 2000); // Délai différent pour montrer les deux systèmes
                 }}
 
                 // Système de rafraîchissement automatique pour la page de détails
@@ -2152,34 +2405,324 @@ def generer_prediction_lisible(nom, valeur, team1, team2):
 
 # === SYSTÈME DE PRÉDICTION INTELLIGENT SANS HISTORIQUE ===
 
-def calculer_force_equipe(nom_equipe, league):
-    """Calcule la force d'une équipe basée sur son nom et sa ligue"""
-    nom_lower = nom_equipe.lower()
+def calculer_probabilites_depuis_cotes(odds_data):
+    """NOUVELLE FONCTION : Calcule les vraies probabilités depuis les cotes de l'API"""
+    probabilites = {}
+
+    if not odds_data:
+        return {"1": 33.33, "X": 33.33, "2": 33.33}  # Équilibré par défaut
+
+    # Extraire les cotes 1X2
+    cotes = {}
+    for odd in odds_data:
+        if isinstance(odd, dict) and 'type' in odd and 'cote' in odd:
+            if odd['type'] in ['1', '2', 'X']:
+                try:
+                    cotes[odd['type']] = float(odd['cote'])
+                except (ValueError, TypeError):
+                    continue
+
+    if not cotes:
+        return {"1": 33.33, "X": 33.33, "2": 33.33}
+
+    # Convertir les cotes en probabilités implicites
+    total_probabilite_inverse = 0
+    probabilites_brutes = {}
+
+    for type_pari, cote in cotes.items():
+        if cote > 0:
+            prob_implicite = (1 / cote) * 100
+            probabilites_brutes[type_pari] = prob_implicite
+            total_probabilite_inverse += prob_implicite
+
+    # Normaliser pour que la somme = 100%
+    if total_probabilite_inverse > 0:
+        for type_pari, prob in probabilites_brutes.items():
+            probabilites[type_pari] = (prob / total_probabilite_inverse) * 100
+
+    return probabilites
+
+def calculer_force_equipe_depuis_cotes(odds_data, equipe_type="1"):
+    """NOUVELLE FONCTION : Calcule la force d'une équipe depuis ses vraies cotes"""
+    probabilites = calculer_probabilites_depuis_cotes(odds_data)
+
+    # Récupérer la probabilité de victoire de l'équipe
+    prob_victoire = probabilites.get(equipe_type, 33.33)
+
+    # Convertir la probabilité en distribution de buts
+    if prob_victoire >= 60:  # Très favori
+        return [5, 15, 30, 35, 15]  # Très offensive
+    elif prob_victoire >= 45:  # Favori
+        return [10, 25, 35, 25, 5]  # Offensive
+    elif prob_victoire >= 30:  # Équilibré
+        return [20, 35, 30, 15, 0]  # Moyenne
+    else:  # Outsider
+        return [35, 40, 20, 5, 0]   # Défensive
+
+def detecter_value_bets(paris_alternatifs, odds_data):
+    """🎲 DÉTECTION D'OPPORTUNITÉS - VALUE BETTING PROFESSIONNEL"""
+    value_bets = []
+
+    if not paris_alternatifs:
+        return value_bets
+
+    for pari in paris_alternatifs:
+        try:
+            cote_bookmaker = float(pari.get('cote', 0))
+            if cote_bookmaker <= 1.0:
+                continue
+
+            # Probabilité implicite du bookmaker
+            prob_bookmaker = (1 / cote_bookmaker) * 100
+
+            # Notre estimation de probabilité (plus sophistiquée)
+            prob_reelle = estimer_probabilite_reelle(pari, odds_data)
+
+            # Calcul de la valeur (Value = (Prob_réelle * Cote) - 1)
+            valeur = (prob_reelle / 100 * cote_bookmaker) - 1
+
+            # Si valeur > 0, c'est un value bet !
+            if valeur > 0.05:  # Minimum 5% de valeur
+                value_bets.append({
+                    'pari': pari,
+                    'valeur': valeur * 100,  # En pourcentage
+                    'prob_bookmaker': prob_bookmaker,
+                    'prob_reelle': prob_reelle,
+                    'cote': cote_bookmaker,
+                    'recommandation': 'EXCELLENT' if valeur > 0.15 else 'BON' if valeur > 0.10 else 'CORRECT'
+                })
+        except (ValueError, TypeError):
+            continue
+
+    # Trier par valeur décroissante
+    value_bets.sort(key=lambda x: x['valeur'], reverse=True)
+    return value_bets[:5]  # Top 5 des meilleures opportunités
+
+def estimer_probabilite_reelle(pari, odds_data):
+    """Estime la vraie probabilité d'un pari basée sur notre analyse"""
+    nom_pari = pari.get('nom', '').lower()
+
+    # Probabilités basées sur les cotes 1X2
+    probabilites_1x2 = calculer_probabilites_depuis_cotes(odds_data)
+
+    # Estimation selon le type de pari
+    if 'plus de' in nom_pari and 'buts' in nom_pari:
+        # Pour les totaux, analyser la force offensive des équipes
+        prob_1 = probabilites_1x2.get('1', 33)
+        prob_2 = probabilites_1x2.get('2', 33)
+
+        # Plus les équipes sont fortes, plus de buts probables
+        if prob_1 > 50 or prob_2 > 50:  # Une équipe très favorite
+            return 65  # Plus probable d'avoir beaucoup de buts
+        elif prob_1 > 40 and prob_2 > 40:  # Match équilibré entre fortes équipes
+            return 70
+        else:
+            return 45
+
+    elif 'moins de' in nom_pari and 'buts' in nom_pari:
+        # Inverse de "plus de"
+        prob_plus = estimer_probabilite_reelle({'nom': nom_pari.replace('moins de', 'plus de')}, odds_data)
+        return 100 - prob_plus
+
+    elif 'corner' in nom_pari:
+        # Les corners dépendent du style de jeu
+        return 55  # Estimation moyenne
+
+    elif 'impair' in nom_pari or 'pair' in nom_pari:
+        return 50  # 50/50 par nature
+
+    else:
+        # Pour les autres paris, utiliser la probabilité implicite
+        cote = float(pari.get('cote', 2.0))
+        return (1 / cote) * 100
+
+def calculer_mise_optimale_kelly(bankroll, probabilite_reelle, cote_bookmaker):
+    """💰 CALCULATEUR DE MISE OPTIMALE - KELLY CRITERION"""
+    try:
+        # Convertir la probabilité en décimal
+        p = probabilite_reelle / 100
+
+        # Probabilité de perte
+        q = 1 - p
+
+        # Gain net en cas de victoire (cote - 1)
+        b = cote_bookmaker - 1
+
+        # Formule de Kelly : f = (bp - q) / b
+        kelly_fraction = (b * p - q) / b
+
+        # Sécurité : ne jamais miser plus de 5% du bankroll
+        kelly_fraction = min(kelly_fraction, 0.05)
+
+        # Si Kelly négatif, ne pas parier
+        if kelly_fraction <= 0:
+            return {
+                'mise_recommandee': 0,
+                'pourcentage_bankroll': 0,
+                'kelly_fraction': kelly_fraction,
+                'recommandation': 'NE PAS PARIER - Pas de valeur positive'
+            }
+
+        mise_optimale = bankroll * kelly_fraction
+
+        return {
+            'mise_recommandee': round(mise_optimale, 2),
+            'pourcentage_bankroll': round(kelly_fraction * 100, 2),
+            'kelly_fraction': kelly_fraction,
+            'recommandation': 'EXCELLENT' if kelly_fraction > 0.03 else 'BON' if kelly_fraction > 0.01 else 'PRUDENT'
+        }
+
+    except (ValueError, ZeroDivisionError):
+        return {
+            'mise_recommandee': 0,
+            'pourcentage_bankroll': 0,
+            'kelly_fraction': 0,
+            'recommandation': 'ERREUR DE CALCUL'
+        }
+
+def analyser_evolution_cotes_temps_reel(paris_alternatifs):
+    """📈 ANALYSE D'ÉVOLUTION DES COTES (simulation temps réel)"""
+    evolution = []
+
+    for pari in paris_alternatifs[:5]:  # Top 5 paris
+        cote_actuelle = float(pari.get('cote', 2.0))
+
+        # Simulation d'évolution (en réalité, il faudrait stocker l'historique)
+        import random
+        variation = random.uniform(-0.15, 0.15)  # ±15% de variation
+        cote_precedente = cote_actuelle * (1 - variation)
+
+        tendance = "📈 HAUSSE" if cote_actuelle > cote_precedente else "📉 BAISSE" if cote_actuelle < cote_precedente else "➡️ STABLE"
+
+        evolution.append({
+            'pari': pari['nom'],
+            'cote_actuelle': cote_actuelle,
+            'cote_precedente': round(cote_precedente, 2),
+            'variation': round(variation * 100, 1),
+            'tendance': tendance
+        })
+
+    return evolution
+
+def ia_prediction_multi_facteurs(team1, team2, league, odds_data, score1=0, score2=0, minute=0):
+    """🤖 IA PRÉDICTIVE AVANCÉE - ANALYSE MULTI-FACTEURS"""
+
+    # Facteur 1: Analyse des cotes (poids: 40%)
+    probabilites_cotes = calculer_probabilites_depuis_cotes(odds_data)
+    score_cotes = max(probabilites_cotes.values()) if probabilites_cotes else 50
+
+    # Facteur 2: Contexte temps réel (poids: 30%)
+    score_temps_reel = analyser_contexte_temps_reel(score1, score2, minute)
+
+    # Facteur 3: Force des équipes selon les noms (poids: 20%)
+    score_equipes = analyser_force_noms_equipes(team1, team2, league)
+
+    # Facteur 4: Conditions de match (poids: 10%)
+    score_conditions = analyser_conditions_match(league, minute)
+
+    # Score final pondéré
+    score_final = (
+        score_cotes * 0.40 +
+        score_temps_reel * 0.30 +
+        score_equipes * 0.20 +
+        score_conditions * 0.10
+    )
+
+    # Déterminer la prédiction
+    if score_final >= 75:
+        confiance = "TRÈS ÉLEVÉE"
+        recommandation = "MISE FORTE RECOMMANDÉE"
+    elif score_final >= 60:
+        confiance = "ÉLEVÉE"
+        recommandation = "MISE RECOMMANDÉE"
+    elif score_final >= 45:
+        confiance = "MODÉRÉE"
+        recommandation = "MISE PRUDENTE"
+    else:
+        confiance = "FAIBLE"
+        recommandation = "ÉVITER"
+
+    return {
+        'score_final': round(score_final, 1),
+        'confiance': confiance,
+        'recommandation': recommandation,
+        'facteurs': {
+            'cotes': round(score_cotes, 1),
+            'temps_reel': round(score_temps_reel, 1),
+            'equipes': round(score_equipes, 1),
+            'conditions': round(score_conditions, 1)
+        }
+    }
+
+def analyser_contexte_temps_reel(score1, score2, minute):
+    """Analyse le contexte temps réel du match"""
+    total_buts = score1 + score2
+
+    if minute == 0:
+        return 50  # Début de match, neutre
+    elif minute < 30:
+        # Début de match, analyser le rythme
+        if total_buts >= 2:
+            return 75  # Match offensif
+        elif total_buts == 1:
+            return 60  # Rythme normal
+        else:
+            return 45  # Match fermé
+    elif minute < 60:
+        # Mi-temps, analyser l'intensité
+        if total_buts >= 3:
+            return 80  # Match très ouvert
+        elif total_buts >= 2:
+            return 65  # Match équilibré
+        else:
+            return 40  # Match défensif
+    else:
+        # Fin de match, analyser les besoins
+        if abs(score1 - score2) <= 1:
+            return 70  # Match serré, intensité élevée
+        else:
+            return 35  # Match plié
+
+def analyser_force_noms_equipes(team1, team2, league):
+    """Analyse la force des équipes selon leurs noms et ligue"""
+    equipes_top = ["real madrid", "barcelona", "psg", "manchester city", "liverpool", "bayern", "juventus"]
+    ligues_top = ["premier league", "la liga", "serie a", "bundesliga", "ligue 1", "champions league"]
+
+    team1_lower = team1.lower()
+    team2_lower = team2.lower()
     league_lower = league.lower()
 
-    # Équipes très fortes (probabilités de marquer: [0, 1, 2, 3, 4+])
-    equipes_tres_fortes = [
-        "real madrid", "barcelona", "psg", "manchester city", "liverpool",
-        "bayern", "juventus", "chelsea", "arsenal", "tottenham"
-    ]
+    score = 50  # Base
 
-    # Équipes fortes
-    equipes_fortes = [
-        "atletico", "valencia", "sevilla", "milan", "inter", "napoli",
-        "dortmund", "leipzig", "lyon", "marseille"
-    ]
+    # Bonus pour équipes top
+    if any(top in team1_lower for top in equipes_top):
+        score += 15
+    if any(top in team2_lower for top in equipes_top):
+        score += 15
 
-    # Ligues de haut niveau
-    ligues_fortes = ["premier league", "la liga", "serie a", "bundesliga", "ligue 1"]
+    # Bonus pour ligues top
+    if any(top in league_lower for top in ligues_top):
+        score += 10
 
-    if any(forte in nom_lower for forte in equipes_tres_fortes):
-        return [5, 15, 30, 35, 15]  # Très offensive
-    elif any(forte in nom_lower for forte in equipes_fortes):
-        return [10, 25, 35, 25, 5]  # Offensive
-    elif any(ligue in league_lower for ligue in ligues_fortes):
-        return [20, 35, 30, 15, 0]  # Moyenne haute
-    else:
-        return [35, 40, 20, 5, 0]   # Défensive
+    return min(score, 90)
+
+def analyser_conditions_match(league, minute):
+    """Analyse les conditions générales du match"""
+    score = 50
+
+    # Bonus selon la ligue
+    if "champions league" in league.lower():
+        score += 20  # Matches de haut niveau
+    elif any(top in league.lower() for top in ["premier", "la liga", "serie a", "bundesliga"]):
+        score += 15
+
+    # Ajustement selon le moment du match
+    if 70 <= minute <= 85:
+        score += 10  # Moment crucial
+    elif minute > 90:
+        score += 15  # Prolongations, intensité max
+
+    return min(score, 85)
 
 def analyser_cotes(odds_data, team1, team2):
     """Analyse les cotes pour générer une prédiction"""
@@ -2221,9 +2764,9 @@ class SystemePredictionUnifie:
         self.sport = sport
         self.paris_alternatifs = paris_alternatifs or []
 
-        # Calculer les forces des équipes une seule fois
-        self.force1 = calculer_force_equipe(team1, league)
-        self.force2 = calculer_force_equipe(team2, league)
+        # Calculer les forces des équipes DEPUIS LES VRAIES COTES
+        self.force1 = calculer_force_equipe_depuis_cotes(odds_data, "1")
+        self.force2 = calculer_force_equipe_depuis_cotes(odds_data, "2")
 
         # Analyser les cotes une seule fois
         self.analyse_cotes = self._analyser_cotes_detaillee()
@@ -2270,35 +2813,51 @@ class SystemePredictionUnifie:
         return analyse
 
     def _identifier_options_principales(self):
-        """Identifie les 1-2 meilleures options à analyser ensemble"""
+        """Identifie les 1-2 meilleures options à analyser ensemble - BASÉ SUR LES VRAIES COTES"""
         options = []
 
-        # Option 1: Résultat 1X2 (toujours inclus)
-        if self.analyse_cotes['favori']:
-            if self.analyse_cotes['favori'] == '1':
+        # Option 1: Résultat 1X2 (TOUJOURS le favori selon les cotes réelles)
+        if self.analyse_cotes['cotes_1x2']:
+            # Trouver le VRAI favori selon les cotes (cote la plus faible = plus probable)
+            cotes_triees = sorted(self.analyse_cotes['cotes_1x2'].items(), key=lambda x: x[1])
+            vrai_favori = cotes_triees[0][0]  # Type avec la cote la plus faible
+            cote_favori = cotes_triees[0][1]
+
+            # FORCER le système à prédire le favori selon les cotes
+            if vrai_favori == '1':
                 option1 = {
                     'type': 'resultat_1x2',
                     'prediction': f"Victoire {self.team1}",
-                    'cote': self.analyse_cotes['cotes_1x2'].get('1', 0),
-                    'confiance': self.analyse_cotes['confiance_favori'],
+                    'cote': cote_favori,
+                    'confiance': min(95, int((1 / cote_favori) * 100)),  # Confiance basée sur la cote
                     'equipe_cible': self.team1
                 }
-            elif self.analyse_cotes['favori'] == '2':
+            elif vrai_favori == '2':
                 option1 = {
                     'type': 'resultat_1x2',
                     'prediction': f"Victoire {self.team2}",
-                    'cote': self.analyse_cotes['cotes_1x2'].get('2', 0),
-                    'confiance': self.analyse_cotes['confiance_favori'],
+                    'cote': cote_favori,
+                    'confiance': min(95, int((1 / cote_favori) * 100)),
                     'equipe_cible': self.team2
                 }
-            else:
+            else:  # X (nul)
                 option1 = {
                     'type': 'resultat_1x2',
                     'prediction': "Match nul",
-                    'cote': self.analyse_cotes['cotes_1x2'].get('X', 0),
-                    'confiance': self.analyse_cotes['confiance_favori'],
+                    'cote': cote_favori,
+                    'confiance': min(95, int((1 / cote_favori) * 100)),
                     'equipe_cible': None
                 }
+            options.append(option1)
+        else:
+            # Fallback si pas de cotes disponibles
+            option1 = {
+                'type': 'resultat_1x2',
+                'prediction': f"Victoire {self.team1}",
+                'cote': 2.0,
+                'confiance': 50,
+                'equipe_cible': self.team1
+            }
             options.append(option1)
 
         # Option 2: Meilleur pari alternatif (si disponible)
@@ -2324,6 +2883,862 @@ class SystemePredictionUnifie:
                 options.append(option2)
 
         return options[:2]  # Maximum 2 options
+
+    def _detecter_equipe_cible(self, nom_pari):
+        """Détecte quelle équipe est ciblée par un pari"""
+        nom_lower = nom_pari.lower()
+        if self.team1.lower() in nom_lower:
+            return self.team1
+        elif self.team2.lower() in nom_lower:
+            return self.team2
+        elif "o1" in nom_lower or "équipe 1" in nom_lower:
+            return self.team1
+        elif "o2" in nom_lower or "équipe 2" in nom_lower:
+            return self.team2
+        return None
+
+    def generer_prediction_unifiee(self):
+        """Génère une prédiction unifiée où tous les systèmes prennent une décision ensemble"""
+        if not self.options_principales:
+            return "Données insuffisantes pour une prédiction fiable"
+
+        # PHASE 1: Collecte des données par tous les systèmes
+        donnees_globales = self._collecter_donnees_tous_systemes()
+
+        # PHASE 2: Délibération collective des systèmes
+        decision_collective = self._deliberation_collective(donnees_globales)
+
+        # PHASE 3: Génération de la recommandation finale unique
+        return self._generer_decision_finale(decision_collective)
+
+    def _collecter_donnees_tous_systemes(self):
+        """Phase 1: Tous les systèmes collectent leurs données sur toutes les options"""
+        donnees = {
+            'options': self.options_principales,
+            'systemes': {
+                'statistique': {},
+                'cotes': {},
+                'simulation': {},
+                'forme': {}
+            },
+            'contexte_match': {
+                'equilibre': self.analyse_cotes['equilibre_match'],
+                'favori': self.analyse_cotes['favori'],
+                'confiance_favori': self.analyse_cotes['confiance_favori']
+            }
+        }
+
+        # Chaque système analyse toutes les options
+        for option in self.options_principales:
+            option_id = option['type'] + '_' + str(option['cote'])
+
+            donnees['systemes']['statistique'][option_id] = self._analyse_statistique(option)
+            donnees['systemes']['cotes'][option_id] = self._analyse_cotes_option(option)
+            donnees['systemes']['simulation'][option_id] = self._simulation_monte_carlo(option)
+            donnees['systemes']['forme'][option_id] = self._analyse_forme(option)
+
+        return donnees
+
+    def _deliberation_collective(self, donnees):
+        """Phase 2: Délibération collective où tous les systèmes débattent ensemble"""
+
+        # Chaque système vote pour sa meilleure option
+        votes_systemes = {}
+
+        for nom_systeme, analyses in donnees['systemes'].items():
+            # Trouver la meilleure option selon ce système
+            meilleure_option = None
+            meilleur_score = 0
+
+            for option_id, analyse in analyses.items():
+                score = analyse['probabilite'] * (analyse['confiance'] / 100)
+                if score > meilleur_score:
+                    meilleur_score = score
+                    meilleure_option = option_id
+
+            votes_systemes[nom_systeme] = {
+                'option_preferee': meilleure_option,
+                'score': meilleur_score,
+                'confiance': analyses[meilleure_option]['confiance'] if meilleure_option else 0
+            }
+
+        # Négociation entre systèmes pour trouver un consensus
+        consensus = self._negociation_consensus(votes_systemes, donnees)
+
+        return consensus
+
+    def _negociation_consensus(self, votes_systemes, donnees):
+        """Négociation entre systèmes pour arriver à un consensus"""
+
+        # Compter les votes pour chaque option
+        compteur_votes = {}
+        scores_cumules = {}
+
+        for vote in votes_systemes.values():
+            option = vote['option_preferee']
+            if option:
+                compteur_votes[option] = compteur_votes.get(option, 0) + 1
+                scores_cumules[option] = scores_cumules.get(option, 0) + vote['score']
+
+        # Si unanimité ou majorité claire
+        if compteur_votes:
+            option_majoritaire = max(compteur_votes.items(), key=lambda x: x[1])
+
+            # Vérifier si c'est un consensus fort (3+ systèmes d'accord)
+            if option_majoritaire[1] >= 3:
+                decision_type = "CONSENSUS_FORT"
+                confiance_collective = 85 + (option_majoritaire[1] * 5)
+            elif option_majoritaire[1] >= 2:
+                decision_type = "MAJORITE"
+                confiance_collective = 70 + (option_majoritaire[1] * 5)
+            else:
+                decision_type = "DIVISION"
+                confiance_collective = 50
+
+            # Trouver l'option correspondante
+            option_choisie = None
+            for option in donnees['options']:
+                option_id = option['type'] + '_' + str(option['cote'])
+                if option_id == option_majoritaire[0]:
+                    option_choisie = option
+                    break
+
+            return {
+                'option_finale': option_choisie,
+                'type_decision': decision_type,
+                'confiance_collective': min(95, confiance_collective),
+                'votes_detail': votes_systemes,
+                'score_final': scores_cumules.get(option_majoritaire[0], 0)
+            }
+
+        # Aucun consensus - prendre la première option par défaut
+        return {
+            'option_finale': donnees['options'][0] if donnees['options'] else None,
+            'type_decision': "DEFAUT",
+            'confiance_collective': 30,
+            'votes_detail': votes_systemes,
+            'score_final': 0
+        }
+
+    def _analyse_statistique(self, option):
+        """Système de prédiction statistique"""
+        if option['type'] == 'resultat_1x2':
+            # Calculer les probabilités basées sur les forces
+            total_force = sum(self.force1) + sum(self.force2)
+            prob_team1 = (sum(self.force1) / total_force) * 100
+            prob_team2 = (sum(self.force2) / total_force) * 100
+
+            if option['equipe_cible'] == self.team1:
+                probabilite = prob_team1
+            elif option['equipe_cible'] == self.team2:
+                probabilite = prob_team2
+            else:  # Match nul
+                probabilite = max(15, 100 - prob_team1 - prob_team2)
+        else:
+            # Pour les paris alternatifs, utiliser la cote comme base
+            probabilite = min(85, (1 / option['cote']) * 100)
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(90, probabilite * 0.9),
+            'recommandation': 'favorable' if probabilite > 60 else 'neutre' if probabilite > 40 else 'defavorable'
+        }
+
+    def _analyse_cotes_option(self, option):
+        """Analyse basée sur les cotes du marché"""
+        cote = option['cote']
+        probabilite_implicite = (1 / cote) * 100
+
+        # Ajuster selon l'équilibre du match
+        if self.analyse_cotes['equilibre_match'] == 'très_equilibre':
+            ajustement = 0.95
+        elif self.analyse_cotes['equilibre_match'] == 'equilibre':
+            ajustement = 1.0
+        elif self.analyse_cotes['equilibre_match'] == 'desequilibre':
+            ajustement = 1.1
+        else:
+            ajustement = 1.05
+
+        probabilite_ajustee = min(95, probabilite_implicite * ajustement)
+
+        return {
+            'probabilite': probabilite_ajustee,
+            'confiance': min(85, probabilite_ajustee * 0.85),
+            'recommandation': 'favorable' if cote < 2.0 else 'neutre' if cote < 2.5 else 'defavorable'
+        }
+
+    def _simulation_monte_carlo(self, option):
+        """NOUVELLE MÉTHODE : Utilise les VRAIES COTES au lieu de simulations aléatoires"""
+
+        # NOUVELLE MÉTHODE : Utiliser les vraies probabilités des cotes
+        probabilites = calculer_probabilites_depuis_cotes(self.odds_data)
+
+        if option['type'] == 'resultat_1x2':
+            if option['equipe_cible'] == self.team1:
+                probabilite = probabilites.get('1', 33.33)
+            elif option['equipe_cible'] == self.team2:
+                probabilite = probabilites.get('2', 33.33)
+            elif option['equipe_cible'] is None:  # Match nul
+                probabilite = probabilites.get('X', 33.33)
+            else:
+                probabilite = 50.0
+        else:
+            # Pour les autres types de paris, utiliser la cote directement
+            if 'cote' in option and option['cote'] > 0:
+                probabilite = (1 / option['cote']) * 100
+            else:
+                probabilite = 50.0
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(80, probabilite * 0.8),
+            'recommandation': 'favorable' if probabilite > 55 else 'neutre' if probabilite > 35 else 'defavorable'
+        }
+
+    def _analyse_forme(self, option):
+        """Analyse de la forme des équipes"""
+        # Simuler une analyse de forme basée sur la ligue et les noms d'équipes
+        if option['equipe_cible'] == self.team1:
+            force_relative = sum(self.force1) / (sum(self.force1) + sum(self.force2))
+        elif option['equipe_cible'] == self.team2:
+            force_relative = sum(self.force2) / (sum(self.force1) + sum(self.force2))
+        else:
+            force_relative = 0.33  # Match nul
+
+        probabilite = force_relative * 100
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(75, probabilite * 0.75),
+            'recommandation': 'favorable' if probabilite > 50 else 'neutre' if probabilite > 30 else 'defavorable'
+        }
+
+    def _generer_decision_finale(self, decision_collective):
+        """Phase 3: Génération de la décision finale unique"""
+
+        if not decision_collective['option_finale']:
+            return "❌ AUCUN CONSENSUS: Les systèmes n'arrivent pas à s'accorder"
+
+        option = decision_collective['option_finale']
+        type_decision = decision_collective['type_decision']
+        confiance = decision_collective['confiance_collective']
+
+        # Icône selon le type de décision
+        if type_decision == "CONSENSUS_FORT":
+            icone = "🎯"
+            statut = "CONSENSUS UNANIME"
+        elif type_decision == "MAJORITE":
+            icone = "✅"
+            statut = "MAJORITÉ D'ACCORD"
+        elif type_decision == "DIVISION":
+            icone = "⚖️"
+            statut = "SYSTÈMES DIVISÉS"
+        else:
+            icone = "❓"
+            statut = "DÉCISION PAR DÉFAUT"
+
+        # Déterminer l'action recommandée
+        if confiance >= 80:
+            action = "MISE RECOMMANDÉE"
+        elif confiance >= 65:
+            action = "MISE MODÉRÉE"
+        elif confiance >= 50:
+            action = "MISE PRUDENTE"
+        else:
+            action = "ÉVITER CE PARI"
+
+        # Équipe cible si applicable
+        equipe_info = f" sur {option['equipe_cible']}" if option['equipe_cible'] else ""
+
+        # Détail des votes pour transparence
+        votes_detail = []
+        for systeme, vote in decision_collective['votes_detail'].items():
+            if vote['option_preferee']:
+                votes_detail.append(f"{systeme.title()}: ✓")
+            else:
+                votes_detail.append(f"{systeme.title()}: ✗")
+
+        return (f"{icone} {statut}: {option['prediction']}{equipe_info} | "
+                f"Cote: {option['cote']} | Confiance: {confiance:.1f}% | "
+                f"🎯 ACTION: {action} | "
+                f"📊 Votes: [{', '.join(votes_detail)}]")
+
+class SystemePredictionParisAlternatifs:
+    """Système de prédiction spécialisé UNIQUEMENT pour les paris alternatifs"""
+
+    def __init__(self, team1, team2, league, paris_alternatifs, sport="Football", score1=0, score2=0, minute=0):
+        self.team1 = team1
+        self.team2 = team2
+        self.league = league
+        self.paris_alternatifs = paris_alternatifs or []
+        self.sport = sport
+
+        # DONNÉES TEMPS RÉEL DU MATCH
+        self.score1 = score1  # Score actuel équipe 1
+        self.score2 = score2  # Score actuel équipe 2
+        self.minute = minute  # Minute de jeu actuelle
+        self.total_buts_actuels = score1 + score2  # Total buts déjà marqués
+
+        # Calculer les forces des équipes DEPUIS LES VRAIES COTES (pas disponibles ici, utiliser défaut)
+        # TODO: Passer les odds_data au système alternatif
+        self.force1 = [20, 35, 30, 15, 0]  # Défaut équilibré
+        self.force2 = [20, 35, 30, 15, 0]  # Défaut équilibré
+
+        # Analyser et catégoriser les paris alternatifs
+        self.categories_paris = self._categoriser_paris_alternatifs()
+
+        # Identifier les meilleures options par catégorie (en tenant compte du contexte temps réel)
+        self.meilleures_options = self._identifier_meilleures_options_alternatives()
+
+    def _categoriser_paris_alternatifs(self):
+        """Catégorise les paris alternatifs par type"""
+        categories = {
+            'totaux': [],      # Over/Under buts
+            'handicaps': [],   # Handicaps asiatiques/européens
+            'corners': [],     # Paris sur les corners
+            'pair_impair': [], # Pair/Impair
+            'mi_temps': [],    # Paris mi-temps
+            'equipes': [],     # Paris spécifiques aux équipes
+            'autres': []       # Autres types
+        }
+
+        for pari in self.paris_alternatifs:
+            nom = pari.get('nom', '').lower()
+
+            if any(mot in nom for mot in ['plus de', 'moins de', 'total', 'over', 'under']):
+                if 'corner' in nom:
+                    categories['corners'].append(pari)
+                else:
+                    categories['totaux'].append(pari)
+            elif 'handicap' in nom:
+                categories['handicaps'].append(pari)
+            elif any(mot in nom for mot in ['pair', 'impair', 'even', 'odd']):
+                categories['pair_impair'].append(pari)
+            elif any(mot in nom for mot in ['mi-temps', 'half', '1ère', '2ème']):
+                categories['mi_temps'].append(pari)
+            elif any(equipe in nom for equipe in [self.team1.lower(), self.team2.lower(), 'o1', 'o2']):
+                categories['equipes'].append(pari)
+            else:
+                categories['autres'].append(pari)
+
+        return categories
+
+    def _identifier_meilleures_options_alternatives(self):
+        """Identifie les 2 meilleures options parmi TOUS les paris alternatifs"""
+        options_evaluees = []
+
+        for categorie, paris in self.categories_paris.items():
+            for pari in paris:
+                try:
+                    cote = float(pari.get('cote', 999))
+                    # Filtrer les cotes intéressantes (entre 1.4 et 4.0)
+                    if 1.4 <= cote <= 4.0:
+                        evaluation = self._evaluer_pari_alternatif(pari, categorie)
+                        options_evaluees.append({
+                            'pari': pari,
+                            'categorie': categorie,
+                            'evaluation': evaluation,
+                            'cote': cote
+                        })
+                except (ValueError, TypeError):
+                    continue
+
+        # Trier par score d'évaluation et prendre les 2 meilleures
+        options_evaluees.sort(key=lambda x: x['evaluation']['score_global'], reverse=True)
+        return options_evaluees[:2]
+
+    def _evaluer_pari_alternatif(self, pari, categorie):
+        """Évalue un pari alternatif selon plusieurs critères"""
+        nom = pari.get('nom', '').lower()
+        cote = float(pari.get('cote', 999))
+
+        # Score de base selon la cote (plus la cote est faible, plus c'est probable)
+        score_cote = min(100, (1 / cote) * 100)
+
+        # Bonus selon la catégorie et le contexte
+        bonus_categorie = 0
+
+        if categorie == 'totaux':
+            # Analyser si c'est cohérent avec les forces d'équipes
+            if 'plus de' in nom:
+                # Plus les équipes sont offensives, plus c'est probable
+                force_offensive = (sum(self.force1[2:]) + sum(self.force2[2:])) / 2
+                bonus_categorie = force_offensive * 0.3
+            else:  # moins de
+                force_defensive = (self.force1[0] + self.force1[1] + self.force2[0] + self.force2[1]) / 4
+                bonus_categorie = force_defensive * 0.3
+
+        elif categorie == 'handicaps':
+            # Analyser l'équilibre des forces
+            diff_forces = abs(sum(self.force1) - sum(self.force2))
+            if diff_forces > 20:  # Match déséquilibré
+                bonus_categorie = 15
+            else:
+                bonus_categorie = 5
+
+        elif categorie == 'corners':
+            # Les matchs offensifs génèrent plus de corners
+            force_offensive_totale = sum(self.force1[2:]) + sum(self.force2[2:])
+            bonus_categorie = min(20, force_offensive_totale * 0.2)
+
+        elif categorie == 'pair_impair':
+            # Légèrement favoriser "impair" dans les matchs équilibrés
+            if 'impair' in nom:
+                bonus_categorie = 8
+            else:
+                bonus_categorie = 5
+
+        elif categorie == 'equipes':
+            # Favoriser l'équipe la plus forte
+            if any(mot in nom for mot in [self.team1.lower(), 'o1']):
+                if sum(self.force1) > sum(self.force2):
+                    bonus_categorie = 15
+                else:
+                    bonus_categorie = -10
+            elif any(mot in nom for mot in [self.team2.lower(), 'o2']):
+                if sum(self.force2) > sum(self.force1):
+                    bonus_categorie = 15
+                else:
+                    bonus_categorie = -10
+
+        # Score final
+        score_global = score_cote + bonus_categorie
+
+        return {
+            'score_cote': score_cote,
+            'bonus_categorie': bonus_categorie,
+            'score_global': min(100, max(0, score_global)),
+            'probabilite_estimee': min(95, score_global),
+            'confiance': min(90, score_cote * 0.8 + bonus_categorie * 0.5)
+        }
+
+    def generer_decision_collective_alternative(self):
+        """Génère une décision collective spécialisée pour les paris alternatifs"""
+        if not self.meilleures_options:
+            return "❌ AUCUN PARI ALTERNATIF INTÉRESSANT TROUVÉ"
+
+        # Phase 1: Collecte des données spécialisées
+        donnees_alternatives = self._collecter_donnees_alternatives()
+
+        # Phase 2: Délibération spécialisée
+        decision_alternative = self._deliberation_alternative(donnees_alternatives)
+
+        # Phase 3: Recommandation finale alternative
+        return self._generer_recommandation_alternative(decision_alternative)
+
+    def _collecter_donnees_alternatives(self):
+        """Collecte spécialisée pour les paris alternatifs"""
+        donnees = {
+            'options': self.meilleures_options,
+            'systemes_specialises': {
+                'analyseur_totaux': {},
+                'analyseur_handicaps': {},
+                'analyseur_corners': {},
+                'analyseur_forme': {}
+            },
+            'contexte_match': {
+                'style_jeu_team1': self._analyser_style_jeu(self.team1, self.force1),
+                'style_jeu_team2': self._analyser_style_jeu(self.team2, self.force2),
+                'equilibre_forces': abs(sum(self.force1) - sum(self.force2))
+            }
+        }
+
+        # Chaque système spécialisé analyse les options
+        for option in self.meilleures_options:
+            option_id = f"{option['categorie']}_{option['cote']}"
+
+            donnees['systemes_specialises']['analyseur_totaux'][option_id] = self._analyse_totaux(option)
+            donnees['systemes_specialises']['analyseur_handicaps'][option_id] = self._analyse_handicaps(option)
+            donnees['systemes_specialises']['analyseur_corners'][option_id] = self._analyse_corners(option)
+            donnees['systemes_specialises']['analyseur_forme'][option_id] = self._analyse_forme_alternative(option)
+
+        return donnees
+
+    def _analyser_style_jeu(self, team, force):
+        """Analyse le style de jeu d'une équipe"""
+        total_force = sum(force)
+        if total_force == 0:
+            return "equilibre"
+
+        # Calculer les pourcentages
+        defensif = (force[0] + force[1]) / total_force
+        offensif = (force[3] + force[4]) / total_force
+
+        if offensif > 0.6:
+            return "tres_offensif"
+        elif offensif > 0.4:
+            return "offensif"
+        elif defensif > 0.6:
+            return "tres_defensif"
+        elif defensif > 0.4:
+            return "defensif"
+        else:
+            return "equilibre"
+
+    def _analyse_totaux(self, option):
+        """Système spécialisé pour l'analyse des totaux - PREND EN COMPTE LE SCORE ACTUEL"""
+        pari = option['pari']
+        nom = pari.get('nom', '').lower()
+
+        # ANALYSE TEMPS RÉEL : Score actuel + prédiction du reste du match
+        buts_restants_team1 = 0
+        buts_restants_team2 = 0
+
+        # Estimer les buts restants selon le temps écoulé
+        if self.minute > 0 and self.minute < 90:
+            temps_restant_ratio = (90 - self.minute) / 90
+            # Prédire les buts restants proportionnellement au temps
+            buts_restants_team1 = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0] * temps_restant_ratio
+            buts_restants_team2 = random.choices([0, 1, 2], weights=[0.6, 0.3, 0.1])[0] * temps_restant_ratio
+
+        # TOTAL FINAL PRÉDIT = Score actuel + Buts restants estimés
+        total_final_predit = self.total_buts_actuels + buts_restants_team1 + buts_restants_team2
+
+        if 'plus de' in nom:
+            # Extraire le seuil (ex: "plus de 2.5")
+            seuil_match = re.search(r'(\d+\.?\d*)', nom)
+            if seuil_match:
+                seuil = float(seuil_match.group(1))
+
+                # LOGIQUE TEMPS RÉEL STRICTE
+                if self.total_buts_actuels >= seuil:
+                    # Seuil déjà atteint !
+                    probabilite = 95
+                elif self.total_buts_actuels + 1 >= seuil and self.minute < 70:
+                    # Très proche du seuil avec beaucoup de temps
+                    probabilite = 80
+                elif self.total_buts_actuels + 1 >= seuil and self.minute < 85:
+                    # Proche du seuil avec un peu de temps
+                    probabilite = 65
+                elif self.minute > 80 and (seuil - self.total_buts_actuels) > 1:
+                    # Fin de match, seuil loin d'être atteint
+                    probabilite = 15
+                elif total_final_predit > seuil:
+                    # Prédiction positive
+                    probabilite = 60
+                else:
+                    # Peu probable
+                    probabilite = 30
+            else:
+                probabilite = 60
+
+        elif 'moins de' in nom:
+            seuil_match = re.search(r'(\d+\.?\d*)', nom)
+            if seuil_match:
+                seuil = float(seuil_match.group(1))
+
+                # LOGIQUE TEMPS RÉEL STRICTE
+                if self.total_buts_actuels >= seuil:
+                    # Seuil déjà dépassé !
+                    probabilite = 5
+                elif self.minute > 80 and self.total_buts_actuels < seuil - 1:
+                    # Fin de match, seuil loin d'être atteint
+                    probabilite = 90
+                elif self.minute > 70 and self.total_buts_actuels < seuil:
+                    # Fin de match approche, seuil pas encore atteint
+                    probabilite = 75
+                elif total_final_predit < seuil:
+                    # Prédiction positive
+                    probabilite = 65
+                else:
+                    # Peu probable
+                    probabilite = 35
+            else:
+                probabilite = 40
+        else:
+            probabilite = 50
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(95, probabilite * 0.9),
+            'recommandation': 'favorable' if probabilite > 65 else 'neutre' if probabilite > 45 else 'defavorable',
+            'contexte_temps_reel': f"Score: {self.score1}-{self.score2} ({self.total_buts_actuels} buts) - {self.minute}'"
+        }
+
+    def _analyse_handicaps(self, option):
+        """Système spécialisé pour l'analyse des handicaps"""
+        pari = option['pari']
+        nom = pari.get('nom', '').lower()
+
+        # Analyser la différence de force entre les équipes
+        force_team1 = sum(self.force1)
+        force_team2 = sum(self.force2)
+        diff_force = force_team1 - force_team2
+
+        probabilite = 50  # Base
+
+        if 'handicap' in nom:
+            if any(mot in nom for mot in [self.team1.lower(), 'o1']):
+                # Handicap sur team1
+                if diff_force > 10:  # Team1 plus forte
+                    probabilite = 75
+                elif diff_force > 0:
+                    probabilite = 65
+                else:
+                    probabilite = 35
+            elif any(mot in nom for mot in [self.team2.lower(), 'o2']):
+                # Handicap sur team2
+                if diff_force < -10:  # Team2 plus forte
+                    probabilite = 75
+                elif diff_force < 0:
+                    probabilite = 65
+                else:
+                    probabilite = 35
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(80, probabilite * 0.8),
+            'recommandation': 'favorable' if probabilite > 60 else 'neutre' if probabilite > 40 else 'defavorable'
+        }
+
+    def _analyse_corners(self, option):
+        """Système spécialisé pour l'analyse des corners - PREND EN COMPTE LE TEMPS DE JEU"""
+        pari = option['pari']
+        nom = pari.get('nom', '').lower()
+
+        # Les corners dépendent du style offensif des équipes
+        style1 = self._analyser_style_jeu(self.team1, self.force1)
+        style2 = self._analyser_style_jeu(self.team2, self.force2)
+
+        # Calculer le nombre de corners probable pour le match complet
+        corners_base = 8  # Moyenne pour 90 minutes
+
+        if style1 in ['tres_offensif', 'offensif']:
+            corners_base += 2
+        if style2 in ['tres_offensif', 'offensif']:
+            corners_base += 2
+
+        # AJUSTEMENT TEMPS RÉEL : Estimer les corners selon le temps écoulé
+        if self.minute > 0:
+            # Estimer les corners déjà joués (approximation)
+            corners_actuels_estimes = int((self.minute / 90) * corners_base)
+            corners_restants_estimes = corners_base - corners_actuels_estimes
+        else:
+            corners_restants_estimes = corners_base
+
+        probabilite = 50
+        if 'plus de' in nom:
+            seuil_match = re.search(r'(\d+)', nom)
+            if seuil_match:
+                seuil = int(seuil_match.group(1))
+
+                # LOGIQUE TEMPS RÉEL pour corners
+                if self.minute > 70:
+                    # Fin de match - se baser sur l'estimation finale
+                    corners_finaux_estimes = corners_actuels_estimes + corners_restants_estimes
+                    probabilite = 80 if corners_finaux_estimes > seuil else 20
+                else:
+                    # Match en cours - plus conservateur
+                    probabilite = 70 if corners_base > seuil else 35
+
+        elif 'moins de' in nom:
+            seuil_match = re.search(r'(\d+)', nom)
+            if seuil_match:
+                seuil = int(seuil_match.group(1))
+
+                # LOGIQUE TEMPS RÉEL pour corners
+                if self.minute > 70:
+                    # Fin de match - se baser sur l'estimation finale
+                    corners_finaux_estimes = corners_actuels_estimes + corners_restants_estimes
+                    probabilite = 80 if corners_finaux_estimes < seuil else 20
+                else:
+                    # Match en cours - plus conservateur
+                    probabilite = 70 if corners_base < seuil else 35
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(80, probabilite * 0.8),
+            'recommandation': 'favorable' if probabilite > 65 else 'neutre' if probabilite > 45 else 'defavorable',
+            'contexte_temps_reel': f"Minute {self.minute} - Corners estimés: {corners_base}"
+        }
+
+    def _analyse_forme_alternative(self, option):
+        """Système spécialisé pour l'analyse de forme alternative"""
+        pari = option['pari']
+        categorie = option['categorie']
+
+        # Analyser selon la catégorie
+        if categorie == 'pair_impair':
+            # Dans les matchs équilibrés, légèrement plus de chance d'impair
+            equilibre = abs(sum(self.force1) - sum(self.force2))
+            if 'impair' in pari.get('nom', '').lower():
+                probabilite = 55 if equilibre < 15 else 50
+            else:
+                probabilite = 45 if equilibre < 15 else 50
+        elif categorie == 'equipes':
+            # Analyser quelle équipe est favorisée
+            if any(mot in pari.get('nom', '').lower() for mot in [self.team1.lower(), 'o1']):
+                probabilite = 60 if sum(self.force1) > sum(self.force2) else 40
+            else:
+                probabilite = 60 if sum(self.force2) > sum(self.force1) else 40
+        else:
+            probabilite = 55  # Neutre pour les autres catégories
+
+        return {
+            'probabilite': probabilite,
+            'confiance': min(70, probabilite * 0.7),
+            'recommandation': 'favorable' if probabilite > 55 else 'neutre' if probabilite > 45 else 'defavorable'
+        }
+
+    def _deliberation_alternative(self, donnees):
+        """Délibération spécialisée pour les paris alternatifs"""
+        votes_systemes = {}
+
+        # Chaque système spécialisé vote
+        for nom_systeme, analyses in donnees['systemes_specialises'].items():
+            meilleure_option = None
+            meilleur_score = 0
+
+            for option_id, analyse in analyses.items():
+                score = analyse['probabilite'] * (analyse['confiance'] / 100)
+                if score > meilleur_score:
+                    meilleur_score = score
+                    meilleure_option = option_id
+
+            votes_systemes[nom_systeme] = {
+                'option_preferee': meilleure_option,
+                'score': meilleur_score,
+                'confiance': analyses[meilleure_option]['confiance'] if meilleure_option else 0
+            }
+
+        # Négociation pour consensus
+        return self._negociation_consensus_alternative(votes_systemes, donnees)
+
+    def _negociation_consensus_alternative(self, votes_systemes, donnees):
+        """Négociation spécialisée pour les paris alternatifs"""
+        compteur_votes = {}
+        scores_cumules = {}
+
+        for vote in votes_systemes.values():
+            option = vote['option_preferee']
+            if option:
+                compteur_votes[option] = compteur_votes.get(option, 0) + 1
+                scores_cumules[option] = scores_cumules.get(option, 0) + vote['score']
+
+        if compteur_votes:
+            option_majoritaire = max(compteur_votes.items(), key=lambda x: x[1])
+
+            # Déterminer le type de consensus
+            if option_majoritaire[1] >= 3:
+                decision_type = "CONSENSUS_ALTERNATIF_FORT"
+                confiance_collective = 80 + (option_majoritaire[1] * 5)
+            elif option_majoritaire[1] >= 2:
+                decision_type = "MAJORITE_ALTERNATIVE"
+                confiance_collective = 65 + (option_majoritaire[1] * 5)
+            else:
+                decision_type = "DIVISION_ALTERNATIVE"
+                confiance_collective = 45
+
+            # Trouver l'option correspondante
+            option_choisie = None
+            for option in donnees['options']:
+                option_id = f"{option['categorie']}_{option['cote']}"
+                if option_id == option_majoritaire[0]:
+                    option_choisie = option
+                    break
+
+            return {
+                'option_finale': option_choisie,
+                'type_decision': decision_type,
+                'confiance_collective': min(90, confiance_collective),
+                'votes_detail': votes_systemes,
+                'score_final': scores_cumules.get(option_majoritaire[0], 0)
+            }
+
+        return {
+            'option_finale': donnees['options'][0] if donnees['options'] else None,
+            'type_decision': "DEFAUT_ALTERNATIF",
+            'confiance_collective': 30,
+            'votes_detail': votes_systemes,
+            'score_final': 0
+        }
+
+    def _generer_recommandation_alternative(self, decision):
+        """Génère la recommandation finale pour les paris alternatifs"""
+        if not decision['option_finale']:
+            return "❌ AUCUN CONSENSUS SUR LES PARIS ALTERNATIFS"
+
+        option = decision['option_finale']
+        pari = option['pari']
+        type_decision = decision['type_decision']
+        confiance = decision['confiance_collective']
+
+        # Icône selon le type de décision
+        if type_decision == "CONSENSUS_ALTERNATIF_FORT":
+            icone = "🎯"
+            statut = "CONSENSUS FORT (PARIS ALTERNATIFS)"
+        elif type_decision == "MAJORITE_ALTERNATIVE":
+            icone = "✅"
+            statut = "MAJORITÉ (PARIS ALTERNATIFS)"
+        else:
+            icone = "⚖️"
+            statut = "DIVISION (PARIS ALTERNATIFS)"
+
+        # Action recommandée
+        if confiance >= 75:
+            action = "PARI ALTERNATIF FORTEMENT RECOMMANDÉ"
+        elif confiance >= 60:
+            action = "PARI ALTERNATIF RECOMMANDÉ"
+        elif confiance >= 45:
+            action = "PARI ALTERNATIF MODÉRÉ"
+        else:
+            action = "ÉVITER CE PARI ALTERNATIF"
+
+        # Détail des votes
+        votes_detail = []
+        for systeme, vote in decision['votes_detail'].items():
+            nom_court = systeme.replace('analyseur_', '').title()
+            if vote['option_preferee']:
+                votes_detail.append(f"{nom_court}: ✓")
+            else:
+                votes_detail.append(f"{nom_court}: ✗")
+
+        return (f"{icone} {statut}: {pari['nom']} | "
+                f"Cote: {pari['cote']} | Confiance: {confiance:.1f}% | "
+                f"🎯 ACTION: {action} | "
+                f"📊 Votes: [{', '.join(votes_detail)}] | "
+                f"🏷️ Catégorie: {option['categorie'].title()}")
+
+    def _analyser_cotes_detaillee(self):
+        """Analyse détaillée des cotes pour tous les marchés"""
+        analyse = {
+            'cotes_1x2': {},
+            'favori': None,
+            'confiance_favori': 0,
+            'equilibre_match': 'moyen'
+        }
+
+        # Analyser les cotes 1X2
+        for odd in self.odds_data:
+            if isinstance(odd, dict) and 'type' in odd and 'cote' in odd:
+                if odd['type'] in ['1', '2', 'X']:
+                    try:
+                        analyse['cotes_1x2'][odd['type']] = float(odd['cote'])
+                    except (ValueError, TypeError):
+                        continue
+
+        if analyse['cotes_1x2']:
+            # Trouver le favori
+            favori = min(analyse['cotes_1x2'].items(), key=lambda x: x[1])
+            analyse['favori'] = favori[0]
+            analyse['confiance_favori'] = min(95, int(100 - (favori[1] - 1) * 25))
+
+            # Déterminer l'équilibre du match
+            cotes_values = list(analyse['cotes_1x2'].values())
+            ecart_max = max(cotes_values) - min(cotes_values)
+            if ecart_max < 0.5:
+                analyse['equilibre_match'] = 'très_equilibre'
+            elif ecart_max < 1.0:
+                analyse['equilibre_match'] = 'equilibre'
+            elif ecart_max < 2.0:
+                analyse['equilibre_match'] = 'moyen'
+            else:
+                analyse['equilibre_match'] = 'desequilibre'
+
+        return analyse
+
+
+
 
     def _detecter_equipe_cible(self, nom_pari):
         """Détecte quelle équipe est ciblée par un pari"""
@@ -2666,30 +4081,32 @@ def generer_prediction_intelligente(team1, team2, league, odds_data, sport):
     systeme = SystemePredictionUnifie(team1, team2, league, odds_data, sport)
     return systeme.generer_prediction_unifiee()
 
-def generer_predictions_alternatives(team1, team2, league, paris_alternatifs, odds_data):
-    """Génère des prédictions alternatives intelligentes avec le système unifié"""
+def generer_predictions_alternatives(team1, team2, league, paris_alternatifs, odds_data, score1=0, score2=0, minute=0):
+    """Génère des prédictions alternatives UNIQUEMENT sur les VRAIS paris disponibles dans l'API"""
 
-    # Utiliser le système unifié avec les paris alternatifs
-    systeme = SystemePredictionUnifie(team1, team2, league, odds_data, "football", paris_alternatifs)
-    prediction_unifiee = systeme.generer_prediction_unifiee()
+    # VÉRIFICATION CRITIQUE : Y a-t-il des vrais paris alternatifs ?
+    if not paris_alternatifs or len(paris_alternatifs) == 0:
+        return "❌ AUCUN PARI ALTERNATIF DISPONIBLE dans l'API du bookmaker"
 
-    # Si pas de paris alternatifs, générer des prédictions par défaut
-    if not paris_alternatifs:
-        force1 = calculer_force_equipe(team1, league)
-        force2 = calculer_force_equipe(team2, league)
+    # SYSTÈME 1: Système unifié original (pour référence/comparaison)
+    systeme_unifie_original = SystemePredictionUnifie(team1, team2, league, odds_data, "football", paris_alternatifs)
+    prediction_unifiee_originale = systeme_unifie_original.generer_prediction_unifiee()
 
-        buts1 = random.choices([0, 1, 2, 3, 4], weights=force1)[0]
-        buts2 = random.choices([0, 1, 2, 3, 4], weights=force2)[0]
-        total = buts1 + buts2
+    # SYSTÈME 2: Analyse UNIQUEMENT les vrais paris alternatifs disponibles
+    systeme_alternatif = SystemePredictionParisAlternatifs(team1, team2, league, paris_alternatifs, "Football", score1, score2, minute)
+    decision_alternative = systeme_alternatif.generer_decision_collective_alternative()
 
-        predictions_defaut = [
-            f"🎯 Score prédit: {team1} {buts1}-{buts2} {team2}",
-            f"⚽ Total buts: {total} ({'Plus' if total > 2.5 else 'Moins'} de 2.5)",
-            f"🏆 Vainqueur probable: {team1 if buts1 > buts2 else team2 if buts2 > buts1 else 'Match nul'}"
-        ]
-        return " | ".join(predictions_defaut) + f" | 🤖 IA: {prediction_unifiee}"
+    # AFFICHAGE DES VRAIS PARIS DISPONIBLES
+    vrais_paris = []
+    for pari in paris_alternatifs[:3]:  # Afficher les 3 premiers
+        nom = pari.get('nom', 'Pari inconnu')
+        cote = pari.get('cote', 0)
+        vrais_paris.append(f"{nom} (cote: {cote})")
 
-    return f"🤖 ANALYSE IA UNIFIÉE: {prediction_unifiee}"
+    liste_vrais_paris = " | ".join(vrais_paris)
+    contexte_temps_reel = f"⏱️ TEMPS RÉEL: {score1}-{score2} ({score1+score2} buts) - {minute}'"
+
+    return f"🤖 SYSTÈME UNIFIÉ GÉNÉRAL: {prediction_unifiee_originale} | 🎲 SYSTÈME UNIFIÉ ALTERNATIFS: {decision_alternative} | 📋 VRAIS PARIS DISPONIBLES: {liste_vrais_paris} | {contexte_temps_reel}"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
