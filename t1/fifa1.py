@@ -2174,7 +2174,23 @@ def home():
         }
 
         response = requests.get(api_url, headers=headers, timeout=10)
-        matches = response.json().get("Value", [])
+
+        # Vérifier le statut de la réponse
+        if response.status_code != 200:
+            print(f"❌ Erreur API: Status {response.status_code}")
+            return render_template_string(ERROR_TEMPLATE,
+                error=f"API indisponible (Status: {response.status_code})")
+
+        # Vérifier que la réponse contient du JSON valide
+        try:
+            api_data = response.json()
+            matches = api_data.get("Value", [])
+        except ValueError as e:
+            print(f"❌ Erreur JSON: {e}")
+            print(f"📄 Réponse reçue: {response.text[:200]}...")
+            return render_template_string(ERROR_TEMPLATE,
+                error="API retourne des données invalides")
+
         api_time = time.time() - api_start
         print(f"⏱️ API récupérée en {api_time:.2f}s - {len(matches)} matchs")
 
@@ -2479,7 +2495,22 @@ def home():
         )
 
     except Exception as e:
-        return f"Erreur : {e}"
+        error_msg = str(e)
+        print(f"❌ Erreur globale: {error_msg}")
+
+        # Messages d'erreur spécifiques
+        if "Expecting value" in error_msg:
+            return render_template_string(ERROR_TEMPLATE,
+                error="L'API retourne des données corrompues ou vides")
+        elif "ConnectionError" in error_msg or "timeout" in error_msg.lower():
+            return render_template_string(ERROR_TEMPLATE,
+                error="Impossible de se connecter à l'API des matchs")
+        elif "403" in error_msg:
+            return render_template_string(ERROR_TEMPLATE,
+                error="Accès bloqué par l'API (restrictions géographiques)")
+        else:
+            return render_template_string(ERROR_TEMPLATE,
+                error=f"Erreur technique: {error_msg}")
 
 def detect_sport(league_name):
     league = league_name.lower()
@@ -2588,6 +2619,35 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None):
     return f"Pari spécial (G{groupe} T{type_pari})"
 
 
+
+ERROR_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <title>Erreur - Live Football & Sports</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 50px; text-align: center; }
+        .error-container { background: white; padding: 40px; border-radius: 10px; max-width: 600px; margin: 0 auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .error-icon { font-size: 64px; margin-bottom: 20px; }
+        .error-title { color: #e74c3c; font-size: 24px; margin-bottom: 15px; }
+        .error-message { color: #666; font-size: 16px; margin-bottom: 30px; }
+        .retry-btn { background: #3498db; color: white; padding: 12px 24px; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .retry-btn:hover { background: #2980b9; }
+    </style>
+</head><body>
+    <div class="error-container">
+        <div class="error-icon">⚠️</div>
+        <h1 class="error-title">Service temporairement indisponible</h1>
+        <p class="error-message">{{ error }}</p>
+        <p style="color: #888; font-size: 14px;">L'API des matchs est actuellement inaccessible. Cela peut être dû à :</p>
+        <ul style="text-align: left; color: #888; font-size: 14px; max-width: 400px; margin: 20px auto;">
+            <li>Restrictions géographiques</li>
+            <li>Maintenance de l'API</li>
+            <li>Problème de connexion réseau</li>
+        </ul>
+        <a href="/" class="retry-btn">🔄 Réessayer</a>
+        <a href="/debug_leagues" class="retry-btn" style="background: #9b59b6; margin-left: 10px;">📊 Voir les ligues</a>
+    </div>
+</body></html>"""
 
 TEMPLATE = """<!DOCTYPE html>
 <html><head>
