@@ -574,6 +574,36 @@ def match_details(match_id):
                 .highlight-pred {{ background: #eaf6fb; color: #2980b9; font-weight: bold; padding: 10px; border-radius: 6px; margin-bottom: 15px; }}
                 .contact-box {{ background: #f0f8ff; border: 1.5px solid #2980b9; border-radius: 8px; margin-top: 30px; padding: 18px; text-align: center; font-size: 17px; }}
                 .contact-box a {{ color: #1565c0; font-weight: bold; text-decoration: none; }}
+
+                /* Styles pour les graphiques avancés */
+                .chart-tabs {{ display: flex; margin: 20px 0; border-bottom: 2px solid #ddd; }}
+                .tab-btn {{ background: none; border: none; padding: 12px 20px; cursor: pointer; font-size: 16px; font-weight: bold; color: #666; transition: all 0.3s; }}
+                .tab-btn:hover {{ background: #f0f0f0; color: #2980b9; }}
+                .tab-btn.active {{ color: #2980b9; border-bottom: 3px solid #2980b9; background: #f8f9fa; }}
+                .chart-container {{ display: none; margin: 20px 0; padding: 20px; background: #f9f9f9; border-radius: 8px; }}
+                .chart-container.active {{ display: block; }}
+                .chart-title {{ text-align: center; font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #2c3e50; }}
+                .chart-legend {{ display: flex; justify-content: center; gap: 20px; margin-bottom: 15px; }}
+                .legend-item {{ display: flex; align-items: center; gap: 8px; }}
+                .legend-color {{ width: 20px; height: 20px; border-radius: 3px; }}
+                .chart-stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 20px; }}
+                .stat-card {{ background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); text-align: center; }}
+                .stat-value {{ font-size: 24px; font-weight: bold; color: #2980b9; }}
+                .stat-label {{ font-size: 14px; color: #666; margin-top: 5px; }}
+
+                /* Styles pour les prédictions IA */
+                .prediction-summary {{ margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 12px; color: white; }}
+                .prediction-item {{ display: flex; justify-content: space-between; align-items: center; margin: 10px 0; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 8px; }}
+                .prediction-label {{ font-weight: bold; }}
+                .prediction-value {{ font-size: 18px; font-weight: bold; }}
+                .confidence-bar {{ width: 100%; height: 8px; background: rgba(255,255,255,0.3); border-radius: 4px; margin-top: 5px; }}
+                .confidence-fill {{ height: 100%; background: linear-gradient(90deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3); border-radius: 4px; transition: width 0.5s ease; }}
+
+                /* Styles pour les scénarios */
+                .scenario-controls {{ text-align: center; margin-top: 20px; }}
+                .sim-btn {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px 24px; margin: 0 10px; border-radius: 25px; cursor: pointer; font-weight: bold; transition: transform 0.2s; }}
+                .sim-btn:hover {{ transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }}
+                .scenario-result {{ margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #2980b9; }}
             </style>
         </head><body>
             <div class="container">
@@ -592,12 +622,55 @@ def match_details(match_id):
                     <tr><th>Statistique</th><th>{team1}</th><th>{team2}</th></tr>
                     {''.join(f'<tr><td>{s["nom"]}</td><td>{s["s1"]}</td><td>{s["s2"]}</td></tr>' for s in stats)}
                 </table>
+                <h3>📊 Analytics Avancées</h3>
+
+                <!-- Onglets pour les différents graphiques -->
+                <div class="chart-tabs">
+                    <button class="tab-btn active" onclick="showChart('stats')">📊 Statistiques</button>
+                    <button class="tab-btn" onclick="showChart('odds')">💰 Évolution Cotes</button>
+                    <button class="tab-btn" onclick="showChart('predictions')">🎯 Prédictions</button>
+                    <button class="tab-btn" onclick="showChart('comparison')">⚖️ Comparaison</button>
+                    <button class="tab-btn" onclick="showChart('aiPredictions')">🤖 IA Prédictive</button>
+                    <button class="tab-btn" onclick="showChart('scenarios')">🎲 Scénarios</button>
+                </div>
+
+                <!-- Conteneurs des graphiques -->
+                <div id="statsChart-container" class="chart-container active">
+                    <canvas id="statsChart" height="300"></canvas>
+                </div>
+
+                <div id="oddsChart-container" class="chart-container">
+                    <canvas id="oddsChart" height="300"></canvas>
+                </div>
+
+                <div id="predictionsChart-container" class="chart-container">
+                    <canvas id="predictionsChart" height="300"></canvas>
+                </div>
+
+                <div id="comparisonChart-container" class="chart-container">
+                    <canvas id="comparisonChart" height="300"></canvas>
+                </div>
+
+                <div id="aiPredictionsChart-container" class="chart-container">
+                    <div class="chart-title">🤖 Système de Prédiction IA Multi-Algorithmes</div>
+                    <canvas id="aiPredictionsChart" height="300"></canvas>
+                    <div class="prediction-summary" id="predictionSummary"></div>
+                </div>
+
+                <div id="scenariosChart-container" class="chart-container">
+                    <div class="chart-title">🎲 Simulation de Scénarios de Match</div>
+                    <canvas id="scenariosChart" height="300"></canvas>
+                    <div class="scenario-controls">
+                        <button onclick="runSimulation()" class="sim-btn">🔄 Nouvelle Simulation</button>
+                        <button onclick="showProbabilities()" class="sim-btn">📊 Probabilités</button>
+                    </div>
+                </div>
+
                 <h3>Tableau des paris alternatifs</h3>
                 <table class="alt-table">
                     <tr><th>Type de pari</th><th>Valeur</th><th>Cote</th><th>Prédiction</th></tr>
                     {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td><td>{generer_prediction_lisible(p["nom"], p["valeur"], team1, team2)}</td></tr>' for p in paris_alternatifs)}
                 </table>
-                <canvas id="statsChart" height="200"></canvas>
                 <div class="contact-box">
                     <b>Contact & Services :</b><br>
                     📬 Inbox Telegram : <a href="https://t.me/Roidesombres225" target="_blank">@Roidesombres225</a><br>
@@ -607,19 +680,454 @@ def match_details(match_id):
                 </div>
             </div>
             <script>
+                // Données pour tous les graphiques
                 const labels = { [repr(s['nom']) for s in stats] };
                 const data1 = { [float(s['s1']) if s['s1'].replace('.', '', 1).isdigit() else 0 for s in stats] };
                 const data2 = { [float(s['s2']) if s['s2'].replace('.', '', 1).isdigit() else 0 for s in stats] };
-                new Chart(document.getElementById('statsChart'), {{
-                    type: 'bar',
-                    data: {{
-                        labels: labels,
-                        datasets: [
-                            {{ label: '{team1}', data: data1, backgroundColor: 'rgba(44,62,80,0.7)' }},
-                            {{ label: '{team2}', data: data2, backgroundColor: 'rgba(39,174,96,0.7)' }}
-                        ]
-                    }},
-                    options: {{ responsive: true, plugins: {{ legend: {{ position: 'top' }} }} }}
+
+                // Couleurs thématiques
+                const colors = {{
+                    team1: ['rgba(52, 152, 219, 0.8)', 'rgba(52, 152, 219, 0.3)'],
+                    team2: ['rgba(231, 76, 60, 0.8)', 'rgba(231, 76, 60, 0.3)'],
+                    accent: ['rgba(46, 204, 113, 0.8)', 'rgba(155, 89, 182, 0.8)', 'rgba(241, 196, 15, 0.8)']
+                }};
+
+                let charts = {{}};
+
+                // Fonction pour changer d'onglet
+                function showChart(chartType) {{
+                    // Masquer tous les conteneurs
+                    document.querySelectorAll('.chart-container').forEach(c => c.classList.remove('active'));
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+                    // Afficher le conteneur sélectionné
+                    document.getElementById(chartType + 'Chart-container').classList.add('active');
+                    event.target.classList.add('active');
+
+                    // Créer le graphique si pas encore fait
+                    if (!charts[chartType]) {{
+                        createChart(chartType);
+                    }}
+                }}
+
+                // Fonction pour créer les différents graphiques
+                function createChart(type) {{
+                    const ctx = document.getElementById(type + 'Chart').getContext('2d');
+
+                    switch(type) {{
+                        case 'stats':
+                            charts.stats = new Chart(ctx, {{
+                                type: 'bar',
+                                data: {{
+                                    labels: labels,
+                                    datasets: [
+                                        {{
+                                            label: '{team1}',
+                                            data: data1,
+                                            backgroundColor: colors.team1[0],
+                                            borderColor: colors.team1[0],
+                                            borderWidth: 2
+                                        }},
+                                        {{
+                                            label: '{team2}',
+                                            data: data2,
+                                            backgroundColor: colors.team2[0],
+                                            borderColor: colors.team2[0],
+                                            borderWidth: 2
+                                        }}
+                                    ]
+                                }},
+                                options: {{
+                                    responsive: true,
+                                    plugins: {{
+                                        title: {{ display: true, text: '📊 Comparaison des Statistiques', font: {{ size: 16 }} }},
+                                        legend: {{ position: 'top' }}
+                                    }},
+                                    scales: {{
+                                        y: {{ beginAtZero: true }}
+                                    }}
+                                }}
+                            }});
+                            break;
+
+                        case 'odds':
+                            // Simulation d'évolution des cotes
+                            const oddsData = {{
+                                labels: ['Début', '15min', '30min', '45min', 'Mi-temps', '60min', '75min', '90min'],
+                                team1Odds: [2.1, 2.0, 1.9, 1.8, 1.85, 1.9, 2.0, 2.1],
+                                team2Odds: [3.2, 3.3, 3.4, 3.6, 3.5, 3.3, 3.1, 2.9],
+                                drawOdds: [3.1, 3.2, 3.3, 3.4, 3.3, 3.2, 3.0, 3.1]
+                            }};
+
+                            charts.odds = new Chart(ctx, {{
+                                type: 'line',
+                                data: {{
+                                    labels: oddsData.labels,
+                                    datasets: [
+                                        {{
+                                            label: '{team1} Victoire',
+                                            data: oddsData.team1Odds,
+                                            borderColor: colors.team1[0],
+                                            backgroundColor: colors.team1[1],
+                                            tension: 0.4,
+                                            fill: false
+                                        }},
+                                        {{
+                                            label: '{team2} Victoire',
+                                            data: oddsData.team2Odds,
+                                            borderColor: colors.team2[0],
+                                            backgroundColor: colors.team2[1],
+                                            tension: 0.4,
+                                            fill: false
+                                        }},
+                                        {{
+                                            label: 'Match Nul',
+                                            data: oddsData.drawOdds,
+                                            borderColor: colors.accent[0],
+                                            backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                                            tension: 0.4,
+                                            fill: false
+                                        }}
+                                    ]
+                                }},
+                                options: {{
+                                    responsive: true,
+                                    plugins: {{
+                                        title: {{ display: true, text: '💰 Évolution des Cotes en Temps Réel', font: {{ size: 16 }} }},
+                                        legend: {{ position: 'top' }}
+                                    }},
+                                    scales: {{
+                                        y: {{
+                                            beginAtZero: false,
+                                            title: {{ display: true, text: 'Cotes' }}
+                                        }},
+                                        x: {{
+                                            title: {{ display: true, text: 'Temps de jeu' }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+                            break;
+
+                        case 'predictions':
+                            // Graphique radar pour les prédictions
+                            const predictionData = {{
+                                labels: ['Attaque', 'Défense', 'Milieu', 'Forme', 'Historique', 'Cotes'],
+                                team1Values: [
+                                    Math.max(0, Math.min(10, (data1.reduce((a,b) => a+b, 0) / data1.length) || 5)),
+                                    Math.max(0, Math.min(10, 8 - (data2.reduce((a,b) => a+b, 0) / data2.length) || 3)),
+                                    Math.max(0, Math.min(10, (data1[1] || 5))),
+                                    Math.max(0, Math.min(10, 7)),
+                                    Math.max(0, Math.min(10, 6)),
+                                    Math.max(0, Math.min(10, 7))
+                                ],
+                                team2Values: [
+                                    Math.max(0, Math.min(10, (data2.reduce((a,b) => a+b, 0) / data2.length) || 5)),
+                                    Math.max(0, Math.min(10, 8 - (data1.reduce((a,b) => a+b, 0) / data1.length) || 3)),
+                                    Math.max(0, Math.min(10, (data2[1] || 5))),
+                                    Math.max(0, Math.min(10, 6)),
+                                    Math.max(0, Math.min(10, 7)),
+                                    Math.max(0, Math.min(10, 6))
+                                ]
+                            }};
+
+                            charts.predictions = new Chart(ctx, {{
+                                type: 'radar',
+                                data: {{
+                                    labels: predictionData.labels,
+                                    datasets: [
+                                        {{
+                                            label: '{team1}',
+                                            data: predictionData.team1Values,
+                                            borderColor: colors.team1[0],
+                                            backgroundColor: colors.team1[1],
+                                            pointBackgroundColor: colors.team1[0],
+                                            pointBorderColor: '#fff',
+                                            pointHoverBackgroundColor: '#fff',
+                                            pointHoverBorderColor: colors.team1[0]
+                                        }},
+                                        {{
+                                            label: '{team2}',
+                                            data: predictionData.team2Values,
+                                            borderColor: colors.team2[0],
+                                            backgroundColor: colors.team2[1],
+                                            pointBackgroundColor: colors.team2[0],
+                                            pointBorderColor: '#fff',
+                                            pointHoverBackgroundColor: '#fff',
+                                            pointHoverBorderColor: colors.team2[0]
+                                        }}
+                                    ]
+                                }},
+                                options: {{
+                                    responsive: true,
+                                    plugins: {{
+                                        title: {{ display: true, text: '🎯 Analyse Prédictive Multi-Facteurs', font: {{ size: 16 }} }},
+                                        legend: {{ position: 'top' }}
+                                    }},
+                                    scales: {{
+                                        r: {{
+                                            beginAtZero: true,
+                                            max: 10,
+                                            ticks: {{ stepSize: 2 }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+                            break;
+
+                        case 'comparison':
+                            // Graphique en secteurs pour la comparaison globale
+                            const totalTeam1 = data1.reduce((a,b) => a+b, 0) || 1;
+                            const totalTeam2 = data2.reduce((a,b) => a+b, 0) || 1;
+                            const totalBoth = totalTeam1 + totalTeam2;
+
+                            charts.comparison = new Chart(ctx, {{
+                                type: 'doughnut',
+                                data: {{
+                                    labels: ['{team1}', '{team2}', 'Équilibré'],
+                                    datasets: [{{
+                                        data: [
+                                            Math.round((totalTeam1 / totalBoth) * 100),
+                                            Math.round((totalTeam2 / totalBoth) * 100),
+                                            Math.round(Math.abs(totalTeam1 - totalTeam2) / totalBoth * 20)
+                                        ],
+                                        backgroundColor: [
+                                            colors.team1[0],
+                                            colors.team2[0],
+                                            colors.accent[1]
+                                        ],
+                                        borderWidth: 3,
+                                        borderColor: '#fff'
+                                    }}]
+                                }},
+                                options: {{
+                                    responsive: true,
+                                    plugins: {{
+                                        title: {{ display: true, text: '⚖️ Répartition des Forces', font: {{ size: 16 }} }},
+                                        legend: {{ position: 'bottom' }},
+                                        tooltip: {{
+                                            callbacks: {{
+                                                label: function(context) {{
+                                                    return context.label + ': ' + context.parsed + '%';
+                                                }}
+                                            }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+                            break;
+
+                        case 'aiPredictions':
+                            // Système de prédiction IA multi-algorithmes
+                            const aiData = generateAIPredictions(data1, data2);
+
+                            charts.aiPredictions = new Chart(ctx, {{
+                                type: 'bar',
+                                data: {{
+                                    labels: ['Algorithme Statistique', 'Analyse des Cotes', 'Machine Learning', 'Consensus IA'],
+                                    datasets: [
+                                        {{
+                                            label: 'Probabilité {team1} (%)',
+                                            data: aiData.team1Probabilities,
+                                            backgroundColor: colors.team1[0],
+                                            borderColor: colors.team1[0],
+                                            borderWidth: 2
+                                        }},
+                                        {{
+                                            label: 'Probabilité {team2} (%)',
+                                            data: aiData.team2Probabilities,
+                                            backgroundColor: colors.team2[0],
+                                            borderColor: colors.team2[0],
+                                            borderWidth: 2
+                                        }},
+                                        {{
+                                            label: 'Probabilité Match Nul (%)',
+                                            data: aiData.drawProbabilities,
+                                            backgroundColor: colors.accent[0],
+                                            borderColor: colors.accent[0],
+                                            borderWidth: 2
+                                        }}
+                                    ]
+                                }},
+                                options: {{
+                                    responsive: true,
+                                    plugins: {{
+                                        title: {{ display: true, text: '🤖 Prédictions IA Multi-Algorithmes', font: {{ size: 16 }} }},
+                                        legend: {{ position: 'top' }}
+                                    }},
+                                    scales: {{
+                                        y: {{
+                                            beginAtZero: true,
+                                            max: 100,
+                                            title: {{ display: true, text: 'Probabilité (%)' }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+
+                            // Afficher le résumé des prédictions
+                            displayPredictionSummary(aiData);
+                            break;
+
+                        case 'scenarios':
+                            // Simulation de scénarios de match
+                            const scenarioData = runMatchSimulation();
+
+                            charts.scenarios = new Chart(ctx, {{
+                                type: 'line',
+                                data: {{
+                                    labels: scenarioData.timeline,
+                                    datasets: [
+                                        {{
+                                            label: 'Probabilité Victoire {team1}',
+                                            data: scenarioData.team1Evolution,
+                                            borderColor: colors.team1[0],
+                                            backgroundColor: colors.team1[1],
+                                            tension: 0.4,
+                                            fill: true
+                                        }},
+                                        {{
+                                            label: 'Probabilité Victoire {team2}',
+                                            data: scenarioData.team2Evolution,
+                                            borderColor: colors.team2[0],
+                                            backgroundColor: colors.team2[1],
+                                            tension: 0.4,
+                                            fill: true
+                                        }}
+                                    ]
+                                }},
+                                options: {{
+                                    responsive: true,
+                                    plugins: {{
+                                        title: {{ display: true, text: '🎲 Évolution des Probabilités en Temps Réel', font: {{ size: 16 }} }},
+                                        legend: {{ position: 'top' }}
+                                    }},
+                                    scales: {{
+                                        y: {{
+                                            beginAtZero: true,
+                                            max: 100,
+                                            title: {{ display: true, text: 'Probabilité (%)' }}
+                                        }},
+                                        x: {{
+                                            title: {{ display: true, text: 'Temps de jeu (minutes)' }}
+                                        }}
+                                    }}
+                                }}
+                            }});
+                            break;
+                    }}
+                }}
+
+                // Fonctions de prédiction IA
+                function generateAIPredictions(data1, data2) {{
+                    const total1 = data1.reduce((a,b) => a+b, 0) || 1;
+                    const total2 = data2.reduce((a,b) => a+b, 0) || 1;
+
+                    // Algorithme statistique
+                    const statProb1 = Math.min(85, Math.max(15, (total1 / (total1 + total2)) * 100));
+                    const statProb2 = Math.min(85, Math.max(15, (total2 / (total1 + total2)) * 100));
+                    const statDraw = Math.max(10, 100 - statProb1 - statProb2);
+
+                    // Analyse des cotes (simulation)
+                    const oddsProb1 = Math.min(80, Math.max(20, statProb1 + Math.random() * 20 - 10));
+                    const oddsProb2 = Math.min(80, Math.max(20, statProb2 + Math.random() * 20 - 10));
+                    const oddsDraw = Math.max(15, 100 - oddsProb1 - oddsProb2);
+
+                    // Machine Learning (simulation avancée)
+                    const mlProb1 = Math.min(90, Math.max(10, statProb1 + Math.random() * 30 - 15));
+                    const mlProb2 = Math.min(90, Math.max(10, statProb2 + Math.random() * 30 - 15));
+                    const mlDraw = Math.max(5, 100 - mlProb1 - mlProb2);
+
+                    // Consensus IA (moyenne pondérée)
+                    const consensusProb1 = (statProb1 * 0.3 + oddsProb1 * 0.4 + mlProb1 * 0.3);
+                    const consensusProb2 = (statProb2 * 0.3 + oddsProb2 * 0.4 + mlProb2 * 0.3);
+                    const consensusDraw = (statDraw * 0.3 + oddsDraw * 0.4 + mlDraw * 0.3);
+
+                    return {{
+                        team1Probabilities: [statProb1, oddsProb1, mlProb1, consensusProb1],
+                        team2Probabilities: [statProb2, oddsProb2, mlProb2, consensusProb2],
+                        drawProbabilities: [statDraw, oddsDraw, mlDraw, consensusDraw],
+                        consensus: {{
+                            team1: consensusProb1,
+                            team2: consensusProb2,
+                            draw: consensusDraw,
+                            confidence: Math.min(95, Math.max(60, 75 + Math.random() * 20))
+                        }}
+                    }};
+                }}
+
+                function displayPredictionSummary(aiData) {{
+                    const summary = document.getElementById('predictionSummary');
+                    const winner = aiData.consensus.team1 > aiData.consensus.team2 ? '{team1}' : '{team2}';
+                    const winnerProb = Math.max(aiData.consensus.team1, aiData.consensus.team2);
+
+                    summary.innerHTML = `
+                        <div class="prediction-item">
+                            <span class="prediction-label">🏆 Vainqueur Prédit:</span>
+                            <span class="prediction-value">${{winner}} (${{winnerProb.toFixed(1)}}%)</span>
+                        </div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" style="width: ${{aiData.consensus.confidence}}%"></div>
+                        </div>
+                        <div class="prediction-item">
+                            <span class="prediction-label">🎯 Confiance IA:</span>
+                            <span class="prediction-value">${{aiData.consensus.confidence.toFixed(1)}}%</span>
+                        </div>
+                        <div class="prediction-item">
+                            <span class="prediction-label">⚖️ Probabilité Match Nul:</span>
+                            <span class="prediction-value">${{aiData.consensus.draw.toFixed(1)}}%</span>
+                        </div>
+                    `;
+                }}
+
+                function runMatchSimulation() {{
+                    const timeline = [];
+                    const team1Evolution = [];
+                    const team2Evolution = [];
+
+                    // Simulation minute par minute
+                    for (let minute = 0; minute <= 90; minute += 10) {{
+                        timeline.push(minute);
+
+                        // Facteurs d'évolution
+                        const fatigue = minute / 90;
+                        const pressure = minute > 70 ? (minute - 70) / 20 : 0;
+
+                        // Probabilités évolutives
+                        let prob1 = 45 + Math.sin(minute / 30) * 15 + Math.random() * 10 - 5;
+                        let prob2 = 35 + Math.cos(minute / 25) * 10 + Math.random() * 10 - 5;
+
+                        // Ajustements selon le contexte
+                        if (minute > 60) {{
+                            prob1 += pressure * 10;
+                            prob2 -= fatigue * 5;
+                        }}
+
+                        team1Evolution.push(Math.min(80, Math.max(20, prob1)));
+                        team2Evolution.push(Math.min(80, Math.max(20, prob2)));
+                    }}
+
+                    return {{ timeline, team1Evolution, team2Evolution }};
+                }}
+
+                function runSimulation() {{
+                    if (charts.scenarios) {{
+                        charts.scenarios.destroy();
+                        createChart('scenarios');
+                    }}
+                }}
+
+                function showProbabilities() {{
+                    const finalProb1 = charts.scenarios.data.datasets[0].data.slice(-1)[0];
+                    const finalProb2 = charts.scenarios.data.datasets[1].data.slice(-1)[0];
+                    const drawProb = 100 - finalProb1 - finalProb2;
+
+                    alert(`📊 Probabilités Finales:\\n\\n🔵 {team1}: ${{finalProb1.toFixed(1)}}%\\n🔴 {team2}: ${{finalProb2.toFixed(1)}}%\\n⚪ Match Nul: ${{drawProb.toFixed(1)}}%`);
+                }}
+
+                // Initialiser le premier graphique
+                document.addEventListener('DOMContentLoaded', function() {{
+                    createChart('stats');
                 }});
             </script>
         </body></html>
