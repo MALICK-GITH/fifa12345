@@ -1141,8 +1141,158 @@ def match_details(match_id):
                 // Initialiser le premier graphique
                 document.addEventListener('DOMContentLoaded', function() {{
                     createChart('stats');
+                    startAutoRefreshDetails();
+                }});
+
+                // Système de rafraîchissement automatique pour la page de détails
+                let detailsRefreshInterval;
+                let isRefreshingDetails = false;
+
+                async function silentRefreshDetails() {{
+                    if (isRefreshingDetails) return;
+                    isRefreshingDetails = true;
+
+                    try {{
+                        // Récupérer l'ID du match depuis l'URL
+                        const pathParts = window.location.pathname.split('/');
+                        const matchId = pathParts[pathParts.length - 1];
+
+                        // Faire la requête en arrière-plan
+                        const response = await fetch(`/match/${{matchId}}`, {{
+                            method: 'GET',
+                            headers: {{
+                                'X-Requested-With': 'XMLHttpRequest',
+                                'Cache-Control': 'no-cache'
+                            }}
+                        }});
+
+                        if (response.ok) {{
+                            const newContent = await response.text();
+
+                            // Parser le nouveau contenu
+                            const parser = new DOMParser();
+                            const newDoc = parser.parseFromString(newContent, 'text/html');
+
+                            // Mettre à jour les éléments dynamiques
+                            updateMatchDetails(newDoc);
+
+                            // Indicateur visuel discret
+                            showDetailsRefreshIndicator();
+                        }}
+                    }} catch (error) {{
+                        console.log('Rafraîchissement détails échoué:', error);
+                    }} finally {{
+                        isRefreshingDetails = false;
+                    }}
+                }}
+
+                function updateMatchDetails(newDoc) {{
+                    // Mettre à jour le score
+                    const currentScore = document.querySelector('.score');
+                    const newScore = newDoc.querySelector('.score');
+                    if (currentScore && newScore && currentScore.textContent !== newScore.textContent) {{
+                        currentScore.textContent = newScore.textContent;
+                        currentScore.style.animation = 'pulse 0.5s ease-in-out';
+                    }}
+
+                    // Mettre à jour le statut
+                    const currentStatus = document.querySelector('.status');
+                    const newStatus = newDoc.querySelector('.status');
+                    if (currentStatus && newStatus && currentStatus.textContent !== newStatus.textContent) {{
+                        currentStatus.textContent = newStatus.textContent;
+                        currentStatus.style.animation = 'pulse 0.5s ease-in-out';
+                    }}
+
+                    // Mettre à jour les cotes principales
+                    const currentOdds = document.querySelector('.odds-main');
+                    const newOdds = newDoc.querySelector('.odds-main');
+                    if (currentOdds && newOdds) {{
+                        currentOdds.innerHTML = newOdds.innerHTML;
+                    }}
+
+                    // Mettre à jour le tableau des paris alternatifs
+                    const currentAltTable = document.querySelector('.alt-table');
+                    const newAltTable = newDoc.querySelector('.alt-table');
+                    if (currentAltTable && newAltTable) {{
+                        currentAltTable.innerHTML = newAltTable.innerHTML;
+                    }}
+
+                    // Mettre à jour les statistiques
+                    const currentStats = document.querySelector('.stats-table');
+                    const newStats = newDoc.querySelector('.stats-table');
+                    if (currentStats && newStats) {{
+                        currentStats.innerHTML = newStats.innerHTML;
+
+                        // Recréer le graphique avec les nouvelles données
+                        if (charts.stats) {{
+                            charts.stats.destroy();
+                            createChart('stats');
+                        }}
+                    }}
+                }}
+
+                function showDetailsRefreshIndicator() {{
+                    const indicator = document.createElement('div');
+                    indicator.style.cssText = `
+                        position: fixed;
+                        top: 10px;
+                        right: 10px;
+                        background: rgba(52, 152, 219, 0.9);
+                        color: white;
+                        padding: 5px 10px;
+                        border-radius: 15px;
+                        font-size: 12px;
+                        z-index: 9999;
+                        opacity: 0;
+                        transition: opacity 0.3s ease;
+                    `;
+                    indicator.textContent = '📊 Données mises à jour';
+                    document.body.appendChild(indicator);
+
+                    // Animation d'apparition/disparition
+                    setTimeout(() => indicator.style.opacity = '1', 10);
+                    setTimeout(() => {{
+                        indicator.style.opacity = '0';
+                        setTimeout(() => document.body.removeChild(indicator), 300);
+                    }}, 2000);
+                }}
+
+                function startAutoRefreshDetails() {{
+                    if (detailsRefreshInterval) {{
+                        clearInterval(detailsRefreshInterval);
+                    }}
+                    detailsRefreshInterval = setInterval(silentRefreshDetails, 5000); // 5 secondes
+                }}
+
+                function stopAutoRefreshDetails() {{
+                    if (detailsRefreshInterval) {{
+                        clearInterval(detailsRefreshInterval);
+                        detailsRefreshInterval = null;
+                    }}
+                }}
+
+                // Gestion de la visibilité de la page
+                document.addEventListener('visibilitychange', function() {{
+                    if (document.hidden) {{
+                        stopAutoRefreshDetails();
+                    }} else {{
+                        startAutoRefreshDetails();
+                    }}
+                }});
+
+                // Arrêter avant de quitter la page
+                window.addEventListener('beforeunload', function() {{
+                    stopAutoRefreshDetails();
                 }});
             </script>
+
+            <style>
+                @keyframes pulse {{
+                    0% {{ transform: scale(1); }}
+                    50% {{ transform: scale(1.05); }}
+                    100% {{ transform: scale(1); }}
+                }}
+            </style>
         </body></html>
         '''
     except Exception as e:
@@ -1276,6 +1426,134 @@ TEMPLATE = """<!DOCTYPE html>
         <span class="icon">🎨</span> Je suis aussi concepteur graphique et créateur de logiciels.<br>
         <span style="color:#d84315; font-size:22px; font-weight:bold;">Vous avez un projet en tête ? Contactez-moi, je suis là pour vous !</span>
     </div>
+
+    <!-- Système de rafraîchissement automatique silencieux -->
+    <script>
+        let refreshInterval;
+        let isRefreshing = false;
+
+        // Fonction de rafraîchissement silencieux
+        async function silentRefresh() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+
+            try {
+                // Récupérer les paramètres actuels
+                const urlParams = new URLSearchParams(window.location.search);
+                const currentPage = urlParams.get('page') || '1';
+                const currentSport = urlParams.get('sport') || '';
+                const currentLeague = urlParams.get('league') || '';
+                const currentStatus = urlParams.get('status') || '';
+
+                // Construire l'URL de rafraîchissement
+                const refreshUrl = `/?page=${currentPage}&sport=${currentSport}&league=${currentLeague}&status=${currentStatus}`;
+
+                // Faire la requête en arrière-plan
+                const response = await fetch(refreshUrl, {
+                    method: 'GET',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+
+                if (response.ok) {
+                    const newContent = await response.text();
+
+                    // Parser le nouveau contenu
+                    const parser = new DOMParser();
+                    const newDoc = parser.parseFromString(newContent, 'text/html');
+
+                    // Mettre à jour seulement le contenu des matchs
+                    const currentMatchesContainer = document.querySelector('.matches-grid');
+                    const newMatchesContainer = newDoc.querySelector('.matches-grid');
+
+                    if (currentMatchesContainer && newMatchesContainer) {
+                        // Sauvegarder la position de scroll
+                        const scrollPosition = window.pageYOffset;
+
+                        // Remplacer le contenu
+                        currentMatchesContainer.innerHTML = newMatchesContainer.innerHTML;
+
+                        // Restaurer la position de scroll
+                        window.scrollTo(0, scrollPosition);
+
+                        // Indicateur visuel discret
+                        showRefreshIndicator();
+                    }
+                }
+            } catch (error) {
+                console.log('Rafraîchissement silencieux échoué:', error);
+            } finally {
+                isRefreshing = false;
+            }
+        }
+
+        // Indicateur visuel discret
+        function showRefreshIndicator() {
+            const indicator = document.createElement('div');
+            indicator.style.cssText = `
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                background: rgba(46, 204, 113, 0.9);
+                color: white;
+                padding: 5px 10px;
+                border-radius: 15px;
+                font-size: 12px;
+                z-index: 9999;
+                opacity: 0;
+                transition: opacity 0.3s ease;
+            `;
+            indicator.textContent = '🔄 Mis à jour';
+            document.body.appendChild(indicator);
+
+            // Animation d'apparition/disparition
+            setTimeout(() => indicator.style.opacity = '1', 10);
+            setTimeout(() => {
+                indicator.style.opacity = '0';
+                setTimeout(() => document.body.removeChild(indicator), 300);
+            }, 1500);
+        }
+
+        // Démarrer le rafraîchissement automatique
+        function startAutoRefresh() {
+            // Arrêter le précédent interval s'il existe
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+
+            // Démarrer le nouveau cycle de rafraîchissement
+            refreshInterval = setInterval(silentRefresh, 5000); // 5 secondes
+        }
+
+        // Arrêter le rafraîchissement
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+
+        // Gestion de la visibilité de la page
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                stopAutoRefresh();
+            } else {
+                startAutoRefresh();
+            }
+        });
+
+        // Démarrer au chargement de la page
+        document.addEventListener('DOMContentLoaded', function() {
+            startAutoRefresh();
+        });
+
+        // Arrêter avant de quitter la page
+        window.addEventListener('beforeunload', function() {
+            stopAutoRefresh();
+        });
+    </script>
 </body></html>"""
 
 def generer_prediction_lisible(nom, valeur, team1, team2):
