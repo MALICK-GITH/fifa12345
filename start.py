@@ -1,106 +1,57 @@
 #!/usr/bin/env python3
 """
-Script de démarrage rapide pour l'application Sports Betting
+🚀 SCRIPT DE DÉMARRAGE ROBUSTE POUR RENDER
+==========================================
+Démarre l'application avec gestion d'erreurs optimisée pour le déploiement
 """
 
 import os
 import sys
-import subprocess
-import time
 
-def check_dependencies():
-    """Vérifier les dépendances"""
-    print("🔍 Vérification des dépendances...")
+def demarrer_application():
+    """Démarre l'application avec gestion d'erreurs"""
     
-    required_packages = [
-        'flask',
-        'flask_sqlalchemy', 
-        'flask_login',
-        'flask_wtf',
-        'requests'
-    ]
+    print("🚀 DÉMARRAGE DU SYSTÈME RÉVOLUTIONNAIRE")
+    print("=" * 50)
     
-    missing_packages = []
-    
-    for package in required_packages:
-        try:
-            __import__(package)
-            print(f"✅ {package}")
-        except ImportError:
-            print(f"❌ {package} manquant")
-            missing_packages.append(package)
-    
-    if missing_packages:
-        print(f"\n⚠️ Packages manquants: {', '.join(missing_packages)}")
-        print("🔧 Installation automatique...")
-        
-        try:
-            subprocess.check_call([
-                sys.executable, "-m", "pip", "install", 
-                "Flask", "Flask-SQLAlchemy", "Flask-Login", 
-                "Flask-WTF", "requests"
-            ])
-            print("✅ Dépendances installées avec succès")
-        except subprocess.CalledProcessError:
-            print("❌ Erreur lors de l'installation")
-            return False
-    
-    return True
-
-def start_application():
-    """Démarrer l'application"""
-    print("\n🚀 Démarrage de l'application...")
+    # Vérification des dépendances essentielles
+    try:
+        import flask
+        print("✅ Flask disponible")
+    except ImportError:
+        print("❌ Flask manquant - Installation requise")
+        sys.exit(1)
     
     try:
-        # Importer et démarrer l'application
-        import fifa1
+        import requests
+        print("✅ Requests disponible")
+    except ImportError:
+        print("❌ Requests manquant - Installation requise")
+        sys.exit(1)
+    
+    # Dépendances optionnelles
+    try:
+        import numpy
+        print("✅ NumPy disponible - Calculs avancés activés")
+    except ImportError:
+        print("⚠️ NumPy non disponible - Calculs simplifiés")
+    
+    print("-" * 50)
+    print("🎯 Lancement de l'application...")
+    
+    # Import et lancement de l'application
+    try:
+        from fifa1 import app
+        port = int(os.environ.get("PORT", 5000))
         
-        print("✅ Application chargée")
-        print("🌐 Serveur démarré sur:")
-        print("   - http://localhost:5000")
-        print("   - http://127.0.0.1:5000")
-        print("\n📱 Fonctionnalités disponibles:")
-        print("   🔐 Comptes utilisateurs (Gratuit/Premium/VIP)")
-        print("   🎨 Mode sombre/clair")
-        print("   ⭐ Système de favoris")
-        print("   📊 6 graphiques interactifs")
-        print("   🤖 Prédictions IA avancées")
-        print("   🔄 Rafraîchissement temps réel")
-        print("   💾 Base de données SQLite")
-        print("   ⚡ Cache intelligent")
-        print("   📱 Interface responsive")
-        print("   🔗 API REST complète")
+        print(f"🌐 Application disponible sur port {port}")
+        print("🎉 Système révolutionnaire opérationnel !")
         
-        print("\n⚠️ Appuyez sur Ctrl+C pour arrêter le serveur")
+        app.run(host="0.0.0.0", port=port, debug=False)
         
-        # Démarrer le serveur
-        fifa1.app.run(host='0.0.0.0', port=5000, debug=True)
-        
-    except KeyboardInterrupt:
-        print("\n🛑 Serveur arrêté par l'utilisateur")
     except Exception as e:
-        print(f"❌ Erreur lors du démarrage: {e}")
-        return False
-    
-    return True
-
-def main():
-    """Fonction principale"""
-    print("🏆 SPORTS BETTING - DÉMARRAGE RAPIDE")
-    print("=" * 40)
-    
-    # Vérifier les dépendances
-    if not check_dependencies():
-        print("❌ Impossible de démarrer sans les dépendances")
-        return False
-    
-    # Démarrer l'application
-    return start_application()
+        print(f"❌ Erreur lors du démarrage : {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    try:
-        success = main()
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        print("\n👋 Au revoir !")
-        sys.exit(0)
+    demarrer_application()
