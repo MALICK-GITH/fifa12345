@@ -1157,13 +1157,19 @@ def match_details(match_id):
                         const pathParts = window.location.pathname.split('/');
                         const matchId = pathParts[pathParts.length - 1];
 
-                        // Faire la requête en arrière-plan
+                        // Faire la requête AJAX optimisée pour les détails
                         const response = await fetch(`/match/${{matchId}}`, {{
                             method: 'GET',
                             headers: {{
                                 'X-Requested-With': 'XMLHttpRequest',
-                                'Cache-Control': 'no-cache'
-                            }}
+                                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                                'Pragma': 'no-cache',
+                                'Expires': '0',
+                                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                            }},
+                            cache: 'no-store',
+                            credentials: 'same-origin',
+                            timeout: 10000
                         }});
 
                         if (response.ok) {{
@@ -1187,27 +1193,30 @@ def match_details(match_id):
                 }}
 
                 function updateMatchDetails(newDoc) {{
-                    // Mettre à jour le score
-                    const currentScore = document.querySelector('.score');
-                    const newScore = newDoc.querySelector('.score');
-                    if (currentScore && newScore && currentScore.textContent !== newScore.textContent) {{
-                        currentScore.textContent = newScore.textContent;
-                        currentScore.style.animation = 'pulse 0.5s ease-in-out';
+                    // Mettre à jour le score (chercher dans le titre h1)
+                    const currentTitle = document.querySelector('h1');
+                    const newTitle = newDoc.querySelector('h1');
+                    if (currentTitle && newTitle && currentTitle.textContent !== newTitle.textContent) {{
+                        currentTitle.textContent = newTitle.textContent;
+                        currentTitle.style.animation = 'pulse 0.5s ease-in-out';
                     }}
 
-                    // Mettre à jour le statut
-                    const currentStatus = document.querySelector('.status');
-                    const newStatus = newDoc.querySelector('.status');
-                    if (currentStatus && newStatus && currentStatus.textContent !== newStatus.textContent) {{
-                        currentStatus.textContent = newStatus.textContent;
-                        currentStatus.style.animation = 'pulse 0.5s ease-in-out';
+                    // Mettre à jour les informations du match
+                    const currentMatchInfo = document.querySelector('.match-info');
+                    const newMatchInfo = newDoc.querySelector('.match-info');
+                    if (currentMatchInfo && newMatchInfo) {{
+                        currentMatchInfo.innerHTML = newMatchInfo.innerHTML;
                     }}
 
-                    // Mettre à jour les cotes principales
-                    const currentOdds = document.querySelector('.odds-main');
-                    const newOdds = newDoc.querySelector('.odds-main');
-                    if (currentOdds && newOdds) {{
-                        currentOdds.innerHTML = newOdds.innerHTML;
+                    // Mettre à jour les cotes principales (chercher dans le contenu)
+                    const currentOddsSection = document.querySelector('h3:contains("Cotes principales")');
+                    const newOddsSection = newDoc.querySelector('h3:contains("Cotes principales")');
+                    if (currentOddsSection && newOddsSection) {{
+                        const currentOddsContent = currentOddsSection.nextElementSibling;
+                        const newOddsContent = newOddsSection.nextElementSibling;
+                        if (currentOddsContent && newOddsContent) {{
+                            currentOddsContent.innerHTML = newOddsContent.innerHTML;
+                        }}
                     }}
 
                     // Mettre à jour le tableau des paris alternatifs
@@ -1217,16 +1226,27 @@ def match_details(match_id):
                         currentAltTable.innerHTML = newAltTable.innerHTML;
                     }}
 
-                    // Mettre à jour les statistiques
-                    const currentStats = document.querySelector('.stats-table');
-                    const newStats = newDoc.querySelector('.stats-table');
-                    if (currentStats && newStats) {{
-                        currentStats.innerHTML = newStats.innerHTML;
+                    // Mettre à jour les statistiques et recréer les graphiques
+                    const currentStatsTable = document.querySelector('table');
+                    const newStatsTable = newDoc.querySelector('table');
+                    if (currentStatsTable && newStatsTable) {{
+                        // Extraire les nouvelles données pour les graphiques
+                        const newRows = newStatsTable.querySelectorAll('tr');
+                        if (newRows.length > 1) {{
+                            // Recréer tous les graphiques avec les nouvelles données
+                            Object.keys(charts).forEach(chartKey => {{
+                                if (charts[chartKey]) {{
+                                    charts[chartKey].destroy();
+                                    delete charts[chartKey];
+                                }}
+                            }});
 
-                        // Recréer le graphique avec les nouvelles données
-                        if (charts.stats) {{
-                            charts.stats.destroy();
-                            createChart('stats');
+                            // Recréer le graphique actuel
+                            const activeTab = document.querySelector('.tab-btn.active');
+                            if (activeTab) {{
+                                const chartType = activeTab.onclick.toString().match(/showChart\('(.+?)'\)/)[1];
+                                createChart(chartType);
+                            }}
                         }}
                     }}
                 }}
@@ -1405,20 +1425,24 @@ TEMPLATE = """<!DOCTYPE html>
         </form>
     </div>
 
-    <table>
-        <tr>
-            <th>Équipe 1</th><th>Score 1</th><th>Score 2</th><th>Équipe 2</th>
-            <th>Sport</th><th>Ligue</th><th>Statut</th><th>Date & Heure</th>
-            <th>Température</th><th>Humidité</th><th>Cotes</th><th>Prédiction</th><th>Détails</th>
-        </tr>
-        {% for m in data %}
-        <tr>
-            <td>{{m.team1}}</td><td>{{m.score1}}</td><td>{{m.score2}}</td><td>{{m.team2}}</td>
-            <td>{{m.sport}}</td><td>{{m.league}}</td><td>{{m.status}}</td><td>{{m.datetime}}</td>
-            <td>{{m.temp}}°C</td><td>{{m.humid}}%</td><td>{{m.odds|join(" | ")}}</td><td>{{m.prediction}}</td>
-            <td>{% if m.id %}<a href="/match/{{m.id}}"><button>Détails</button></a>{% else %}–{% endif %}</td>
-        </tr>
-        {% endfor %}
+    <table class="matches-table">
+        <thead>
+            <tr>
+                <th>Équipe 1</th><th>Score 1</th><th>Score 2</th><th>Équipe 2</th>
+                <th>Sport</th><th>Ligue</th><th>Statut</th><th>Date & Heure</th>
+                <th>Température</th><th>Humidité</th><th>Cotes</th><th>Prédiction</th><th>Détails</th>
+            </tr>
+        </thead>
+        <tbody class="matches-content">
+            {% for m in data %}
+            <tr>
+                <td>{{m.team1}}</td><td>{{m.score1}}</td><td>{{m.score2}}</td><td>{{m.team2}}</td>
+                <td>{{m.sport}}</td><td>{{m.league}}</td><td>{{m.status}}</td><td>{{m.datetime}}</td>
+                <td>{{m.temp}}°C</td><td>{{m.humid}}%</td><td>{{m.odds|join(" | ")}}</td><td>{{m.prediction}}</td>
+                <td>{% if m.id %}<a href="/match/{{m.id}}"><button>Détails</button></a>{% else %}–{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
     </table>
     <div class="contact-box">
         <span class="icon">📬</span> Inbox Telegram : <a href="https://t.me/Roidesombres225" target="_blank">@Roidesombres225</a><br>
@@ -1437,6 +1461,8 @@ TEMPLATE = """<!DOCTYPE html>
             if (isRefreshing) return;
             isRefreshing = true;
 
+            console.log('🔄 Début du rafraîchissement...'); // Debug
+
             try {
                 // Récupérer les paramètres actuels
                 const urlParams = new URLSearchParams(window.location.search);
@@ -1448,72 +1474,144 @@ TEMPLATE = """<!DOCTYPE html>
                 // Construire l'URL de rafraîchissement
                 const refreshUrl = `/?page=${currentPage}&sport=${currentSport}&league=${currentLeague}&status=${currentStatus}`;
 
-                // Faire la requête en arrière-plan
+                // Faire la requête AJAX optimisée
                 const response = await fetch(refreshUrl, {
                     method: 'GET',
                     headers: {
                         'X-Requested-With': 'XMLHttpRequest',
-                        'Cache-Control': 'no-cache'
-                    }
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                    },
+                    cache: 'no-store',
+                    credentials: 'same-origin'
                 });
 
                 if (response.ok) {
                     const newContent = await response.text();
+                    console.log('✅ Réponse reçue, taille:', newContent.length); // Debug
 
                     // Parser le nouveau contenu
                     const parser = new DOMParser();
                     const newDoc = parser.parseFromString(newContent, 'text/html');
 
                     // Mettre à jour seulement le contenu des matchs
-                    const currentMatchesContainer = document.querySelector('.matches-grid');
-                    const newMatchesContainer = newDoc.querySelector('.matches-grid');
+                    const currentMatchesContainer = document.querySelector('.matches-content');
+                    const newMatchesContainer = newDoc.querySelector('.matches-content');
+
+                    console.log('🔍 Conteneurs trouvés:', !!currentMatchesContainer, !!newMatchesContainer); // Debug
 
                     if (currentMatchesContainer && newMatchesContainer) {
                         // Sauvegarder la position de scroll
                         const scrollPosition = window.pageYOffset;
 
-                        // Remplacer le contenu
-                        currentMatchesContainer.innerHTML = newMatchesContainer.innerHTML;
+                        // Vérifier si le contenu a changé
+                        if (currentMatchesContainer.innerHTML !== newMatchesContainer.innerHTML) {
+                            // Remplacer le contenu
+                            currentMatchesContainer.innerHTML = newMatchesContainer.innerHTML;
+                            console.log('🔄 Contenu mis à jour!'); // Debug
 
-                        // Restaurer la position de scroll
-                        window.scrollTo(0, scrollPosition);
+                            // Restaurer la position de scroll
+                            window.scrollTo(0, scrollPosition);
 
-                        // Indicateur visuel discret
-                        showRefreshIndicator();
+                            // Indicateur visuel de succès
+                            showRefreshIndicator('success', '🔄 Données mises à jour');
+                        } else {
+                            console.log('📋 Aucun changement détecté'); // Debug
+                        }
+                    } else {
+                        console.log('❌ Conteneurs non trouvés'); // Debug
                     }
+                } else {
+                    console.log('❌ Erreur HTTP:', response.status); // Debug
                 }
             } catch (error) {
-                console.log('Rafraîchissement silencieux échoué:', error);
+                console.log('❌ Rafraîchissement AJAX échoué:', error);
+
+                // Indicateur d'erreur
+                showRefreshIndicator('error', '❌ Erreur de connexion');
+
+                // Mettre à jour le statut de connexion
+                const statusIndicator = document.getElementById('connection-status');
+                if (statusIndicator) {
+                    statusIndicator.style.background = 'rgba(231, 76, 60, 0.8)';
+                    statusIndicator.textContent = '🔴 Déconnecté';
+                }
+
+                // Retry automatique après 10 secondes en cas d'erreur
+                setTimeout(() => {
+                    if (!isRefreshing) {
+                        console.log('🔄 Tentative de reconnexion...');
+                        showRefreshIndicator('loading', '🔄 Reconnexion...');
+                        silentRefresh();
+                    }
+                }, 10000);
+
             } finally {
                 isRefreshing = false;
             }
         }
 
-        // Indicateur visuel discret
-        function showRefreshIndicator() {
+        // Indicateur visuel avec statut AJAX
+        function showRefreshIndicator(type = 'success', message = '🔄 Mis à jour') {
             const indicator = document.createElement('div');
+
+            const colors = {
+                success: 'rgba(46, 204, 113, 0.9)',
+                error: 'rgba(231, 76, 60, 0.9)',
+                loading: 'rgba(52, 152, 219, 0.9)',
+                warning: 'rgba(241, 196, 15, 0.9)'
+            };
+
             indicator.style.cssText = `
                 position: fixed;
                 top: 10px;
                 right: 10px;
-                background: rgba(46, 204, 113, 0.9);
+                background: ${colors[type]};
                 color: white;
-                padding: 5px 10px;
-                border-radius: 15px;
-                font-size: 12px;
+                padding: 8px 15px;
+                border-radius: 20px;
+                font-size: 13px;
+                font-weight: bold;
                 z-index: 9999;
                 opacity: 0;
-                transition: opacity 0.3s ease;
+                transition: all 0.3s ease;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
             `;
-            indicator.textContent = '🔄 Mis à jour';
+            indicator.textContent = message;
             document.body.appendChild(indicator);
 
             // Animation d'apparition/disparition
             setTimeout(() => indicator.style.opacity = '1', 10);
             setTimeout(() => {
                 indicator.style.opacity = '0';
-                setTimeout(() => document.body.removeChild(indicator), 300);
-            }, 1500);
+                setTimeout(() => {
+                    if (document.body.contains(indicator)) {
+                        document.body.removeChild(indicator);
+                    }
+                }, 300);
+            }, type === 'error' ? 3000 : 1500);
+        }
+
+        // Indicateur de statut de connexion
+        function showConnectionStatus() {
+            const statusIndicator = document.createElement('div');
+            statusIndicator.id = 'connection-status';
+            statusIndicator.style.cssText = `
+                position: fixed;
+                bottom: 10px;
+                right: 10px;
+                background: rgba(46, 204, 113, 0.8);
+                color: white;
+                padding: 5px 10px;
+                border-radius: 15px;
+                font-size: 11px;
+                z-index: 9998;
+                opacity: 0.7;
+            `;
+            statusIndicator.textContent = '🟢 Connecté';
+            document.body.appendChild(statusIndicator);
         }
 
         // Démarrer le rafraîchissement automatique
@@ -1546,6 +1644,7 @@ TEMPLATE = """<!DOCTYPE html>
 
         // Démarrer au chargement de la page
         document.addEventListener('DOMContentLoaded', function() {
+            showConnectionStatus();
             startAutoRefresh();
         });
 
