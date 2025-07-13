@@ -1,28 +1,3 @@
-# 🚀 DÉPENDANCES SYSTÈME DE PRÉDICTION RÉVOLUTIONNAIRE
-# ===================================================
-# Version optimisée pour déploiement Render
-
-# 🌐 Framework Web Principal
 Flask==2.3.3
-Werkzeug==2.3.7
-
-# 📡 Requêtes HTTP et API
 requests==2.31.0
-
-# 🧮 Calculs Mathématiques et Scientifiques
-numpy==1.24.3
-
-# 📅 Gestion des Dates et Temps
 python-dateutil==2.8.2
-
-# 🎨 Interface Utilisateur
-Jinja2==3.1.2
-MarkupSafe==2.1.3
-
-# 🔧 Utilitaires
-click==8.1.6
-itsdangerous==2.1.2
-
-# 📦 Build Tools (pour Render)
-setuptools>=65.0.0
-wheel>=0.37.0
