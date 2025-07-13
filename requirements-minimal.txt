@@ -1,0 +1,9 @@
+# 🚀 DÉPENDANCES MINIMALES POUR DÉPLOIEMENT RENDER
+# =================================================
+# Version ultra-légère pour éviter les erreurs de build
+
+Flask==2.3.3
+requests==2.31.0
+python-dateutil==2.8.2
+setuptools>=65.0.0
+wheel>=0.37.0
