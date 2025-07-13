@@ -102,7 +102,7 @@ def home():
                     continue
 
                 match_ts = match.get("S", 0)
-                match_time = datetime.datetime.utcfromtimestamp(match_ts).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
+                match_time = datetime.datetime.fromtimestamp(match_ts, datetime.timezone.utc).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
 
                 # --- Cotes ---
                 odds_data = []
@@ -567,8 +567,16 @@ def match_details(match_id):
                         })
         # Filtrer les paris alternatifs selon la cote demandée
         paris_alternatifs = [p for p in paris_alternatifs if 1.499 <= float(p["cote"]) <= 3]
-        # Prédictions alternatives intelligentes
-        prediction_alt = generer_predictions_alternatives(team1, team2, league, paris_alternatifs, odds_data)
+        # Filtrer les paris corners et pair/impair du tableau alternatif
+        paris_alternatifs_filtres = []
+        for p in paris_alternatifs:
+            nom_lower = p['nom'].lower()
+            # Exclure corners et pair/impair du tableau principal
+            if not (('corner' in nom_lower) or ('pair' in nom_lower) or ('impair' in nom_lower)):
+                paris_alternatifs_filtres.append(p)
+
+        # Prédictions alternatives intelligentes (sans corners et pair/impair)
+        prediction_alt = generer_predictions_alternatives(team1, team2, league, paris_alternatifs_filtres, odds_data)
         # HTML avec tableau des paris alternatifs
         return f'''
         <!DOCTYPE html>
@@ -617,6 +625,24 @@ def match_details(match_id):
                 .sim-btn {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 12px 24px; margin: 0 10px; border-radius: 25px; cursor: pointer; font-weight: bold; transition: transform 0.2s; }}
                 .sim-btn:hover {{ transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }}
                 .scenario-result {{ margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #2980b9; }}
+
+                /* Styles pour les prédictions spécialisées */
+                .prediction-tabs {{ display: flex; flex-wrap: wrap; margin: 20px 0; border-bottom: 2px solid #ddd; gap: 5px; }}
+                .pred-tab-btn {{ background: none; border: none; padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: bold; color: #666; transition: all 0.3s; border-radius: 8px 8px 0 0; }}
+                .pred-tab-btn:hover {{ background: #f0f0f0; color: #2980b9; }}
+                .pred-tab-btn.active {{ color: #2980b9; border-bottom: 3px solid #2980b9; background: #f8f9fa; }}
+                .prediction-container {{ display: none; margin: 20px 0; padding: 20px; background: #f9f9f9; border-radius: 8px; }}
+                .prediction-container.active {{ display: block; }}
+                .pred-table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+                .pred-table th {{ background: #2980b9; color: white; padding: 12px; text-align: left; }}
+                .pred-table td {{ padding: 10px; border-bottom: 1px solid #ddd; }}
+                .pred-table tr:hover {{ background: #f0f8ff; }}
+                .probability-bar {{ width: 100%; height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden; }}
+                .probability-fill {{ height: 100%; background: linear-gradient(90deg, #e74c3c, #f39c12, #f1c40f, #2ecc71); transition: width 0.5s ease; }}
+                .prediction-badge {{ padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; color: white; }}
+                .badge-high {{ background: #27ae60; }}
+                .badge-medium {{ background: #f39c12; }}
+                .badge-low {{ background: #e74c3c; }}
             </style>
         </head><body>
             <div class="container">
@@ -679,10 +705,71 @@ def match_details(match_id):
                     </div>
                 </div>
 
-                <h3>Tableau des paris alternatifs</h3>
+                <h3>🎯 Centre de Prédictions Spécialisées</h3>
+
+                <!-- Onglets pour les catégories de prédictions -->
+                <div class="prediction-tabs">
+                    <button class="pred-tab-btn active" onclick="showPredictionCategory('pair-impair')">🔢 Pair/Impair</button>
+                    <button class="pred-tab-btn" onclick="showPredictionCategory('corners')">⚽ Corners</button>
+                    <button class="pred-tab-btn" onclick="showPredictionCategory('mi-temps')">⏰ Mi-temps</button>
+                    <button class="pred-tab-btn" onclick="showPredictionCategory('handicaps')">⚖️ Handicaps</button>
+                    <button class="pred-tab-btn" onclick="showPredictionCategory('totaux')">📊 Totaux</button>
+                    <button class="pred-tab-btn" onclick="showPredictionCategory('autres')">📋 Autres</button>
+                </div>
+
+                <!-- Conteneurs des prédictions par catégorie -->
+                <div id="pair-impair-container" class="prediction-container active">
+                    <h4>🔢 Prédictions Pair/Impair</h4>
+                    <table class="pred-table">
+                        <tr><th>Type</th><th>Valeur</th><th>Cote</th><th>Prédiction IA</th><th>Probabilité</th></tr>
+                        <tbody id="pair-impair-content"></tbody>
+                    </table>
+                </div>
+
+                <div id="corners-container" class="prediction-container">
+                    <h4>⚽ Prédictions Corners</h4>
+                    <table class="pred-table">
+                        <tr><th>Type</th><th>Valeur</th><th>Cote</th><th>Prédiction IA</th><th>Probabilité</th></tr>
+                        <tbody id="corners-content"></tbody>
+                    </table>
+                </div>
+
+                <div id="mi-temps-container" class="prediction-container">
+                    <h4>⏰ Prédictions Mi-temps</h4>
+                    <table class="pred-table">
+                        <tr><th>Type</th><th>Valeur</th><th>Cote</th><th>Prédiction IA</th><th>Probabilité</th></tr>
+                        <tbody id="mi-temps-content"></tbody>
+                    </table>
+                </div>
+
+                <div id="handicaps-container" class="prediction-container">
+                    <h4>⚖️ Prédictions Handicaps</h4>
+                    <table class="pred-table">
+                        <tr><th>Type</th><th>Valeur</th><th>Cote</th><th>Prédiction IA</th><th>Probabilité</th></tr>
+                        <tbody id="handicaps-content"></tbody>
+                    </table>
+                </div>
+
+                <div id="totaux-container" class="prediction-container">
+                    <h4>📊 Prédictions Totaux (Over/Under)</h4>
+                    <table class="pred-table">
+                        <tr><th>Type</th><th>Valeur</th><th>Cote</th><th>Prédiction IA</th><th>Probabilité</th></tr>
+                        <tbody id="totaux-content"></tbody>
+                    </table>
+                </div>
+
+                <div id="autres-container" class="prediction-container">
+                    <h4>📋 Autres Prédictions</h4>
+                    <table class="pred-table">
+                        <tr><th>Type</th><th>Valeur</th><th>Cote</th><th>Prédiction IA</th><th>Probabilité</th></tr>
+                        <tbody id="autres-content"></tbody>
+                    </table>
+                </div>
+
+                <h3>📊 Tableau des Paris Alternatifs (Filtré)</h3>
                 <table class="alt-table">
                     <tr><th>Type de pari</th><th>Valeur</th><th>Cote</th><th>Prédiction</th></tr>
-                    {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td><td>{generer_prediction_lisible(p["nom"], p["valeur"], team1, team2)}</td></tr>' for p in paris_alternatifs)}
+                    {''.join(f'<tr><td>{p["nom"]}</td><td>{p["valeur"]}</td><td>{p["cote"]}</td><td>{generer_prediction_lisible(p["nom"], p["valeur"], team1, team2)}</td></tr>' for p in paris_alternatifs_filtres)}
                 </table>
                 <div class="contact-box">
                     <b>Contact & Services :</b><br>
@@ -1138,9 +1225,146 @@ def match_details(match_id):
                     alert(`📊 Probabilités Finales:\\n\\n🔵 {team1}: ${{finalProb1.toFixed(1)}}%\\n🔴 {team2}: ${{finalProb2.toFixed(1)}}%\\n⚪ Match Nul: ${{drawProb.toFixed(1)}}%`);
                 }}
 
-                // Initialiser le premier graphique
+                // Fonction pour changer de catégorie de prédiction
+                function showPredictionCategory(category) {{
+                    // Masquer tous les conteneurs
+                    document.querySelectorAll('.prediction-container').forEach(c => c.classList.remove('active'));
+                    document.querySelectorAll('.pred-tab-btn').forEach(b => b.classList.remove('active'));
+
+                    // Afficher le conteneur sélectionné
+                    document.getElementById(category + '-container').classList.add('active');
+                    event.target.classList.add('active');
+                }}
+
+                // Données des prédictions générées côté serveur (toutes les prédictions pour le centre spécialisé)
+                const predictionsData = [
+                    {''.join([f'''{{
+                        nom: "{p['nom']}",
+                        valeur: "{p['valeur']}",
+                        cote: {p['cote']}
+                    }},''' for p in paris_alternatifs])}
+                ];
+
+                // Fonction pour organiser les prédictions par catégorie
+                function organizePredictions() {{
+                    console.log('📊 Données de prédictions:', predictionsData);
+
+                    // Catégoriser les prédictions
+                    const categories = {{
+                        'pair-impair': [],
+                        'corners': [],
+                        'mi-temps': [],
+                        'handicaps': [],
+                        'totaux': [],
+                        'autres': []
+                    }};
+
+                    predictionsData.forEach(pred => {{
+                        const nom = pred.nom.toLowerCase();
+                        console.log('🔍 Analyse prédiction:', nom);
+
+                        // Catégorisation améliorée
+                        if (nom.includes('pair') || nom.includes('impair')) {{
+                            categories['pair-impair'].push(pred);
+                            console.log('✅ Pair/Impair:', nom);
+                        }} else if (nom.includes('corner')) {{
+                            categories['corners'].push(pred);
+                            console.log('✅ Corners:', nom);
+                        }} else if (nom.includes('mi-temps') || nom.includes('mi temps') || nom.includes('(1ère') || nom.includes('(2ème') || nom.includes('première') || nom.includes('deuxième')) {{
+                            categories['mi-temps'].push(pred);
+                            console.log('✅ Mi-temps:', nom);
+                        }} else if (nom.includes('handicap')) {{
+                            categories['handicaps'].push(pred);
+                            console.log('✅ Handicap:', nom);
+                        }} else if (nom.includes('plus de') || nom.includes('moins de') || nom.includes('over') || nom.includes('under') || (nom.includes('total') && nom.includes('but'))) {{
+                            categories['totaux'].push(pred);
+                            console.log('✅ Totaux:', nom);
+                        }} else {{
+                            categories['autres'].push(pred);
+                            console.log('✅ Autres:', nom);
+                        }}
+                    }});
+
+                    // Remplir chaque catégorie
+                    Object.keys(categories).forEach(category => {{
+                        const container = document.getElementById(category + '-content');
+                        if (container) {{
+                            if (categories[category].length === 0) {{
+                                container.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666; font-style: italic;">Aucune prédiction disponible pour cette catégorie</td></tr>';
+                            }} else {{
+                                container.innerHTML = categories[category].map(pred => {{
+                                    const probability = calculateProbability(pred.cote);
+                                    const badge = getProbabilityBadge(probability);
+                                    const predictionText = generateSmartPrediction(pred, '{team1}', '{team2}');
+
+                                    return `
+                                        <tr>
+                                            <td><strong>${{pred.nom}}</strong></td>
+                                            <td>${{pred.valeur || '–'}}</td>
+                                            <td><span style="font-weight: bold; color: #2980b9;">${{pred.cote}}</span></td>
+                                            <td>${{predictionText}}</td>
+                                            <td>
+                                                <div class="probability-bar">
+                                                    <div class="probability-fill" style="width: ${{probability}}%"></div>
+                                                </div>
+                                                <span class="prediction-badge ${{badge.class}}">${{probability.toFixed(1)}}%</span>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }}).join('');
+                            }}
+                        }}
+                    }});
+
+                    // Afficher le nombre de prédictions par catégorie dans les onglets
+                    Object.keys(categories).forEach(category => {{
+                        const tabBtn = document.querySelector(`[onclick="showPredictionCategory('${{category}}')"]`);
+                        if (tabBtn) {{
+                            const count = categories[category].length;
+                            const originalText = tabBtn.textContent.split(' (')[0];
+                            tabBtn.textContent = `${{originalText}} (${{count}})`;
+                        }}
+                    }});
+                }}
+
+                // Calculer la probabilité basée sur la cote
+                function calculateProbability(cote) {{
+                    return Math.min(95, Math.max(5, (1 / parseFloat(cote)) * 100));
+                }}
+
+                // Obtenir le badge de probabilité
+                function getProbabilityBadge(probability) {{
+                    if (probability >= 70) return {{ class: 'badge-high', text: 'Élevée' }};
+                    if (probability >= 40) return {{ class: 'badge-medium', text: 'Moyenne' }};
+                    return {{ class: 'badge-low', text: 'Faible' }};
+                }}
+
+                // Générer une prédiction intelligente
+                function generateSmartPrediction(pred, team1, team2) {{
+                    const nom = pred.nom.toLowerCase();
+                    const cote = parseFloat(pred.cote);
+
+                    if (nom.includes('pair')) {{
+                        return cote < 2.0 ? "🔢 Résultat pair très probable" : "🔢 Résultat pair possible";
+                    }} else if (nom.includes('impair')) {{
+                        return cote < 2.0 ? "🔢 Résultat impair très probable" : "🔢 Résultat impair possible";
+                    }} else if (nom.includes('corner')) {{
+                        return cote < 2.0 ? "⚽ Prédiction corners favorable" : "⚽ Prédiction corners risquée";
+                    }} else if (nom.includes('mi-temps')) {{
+                        return cote < 2.5 ? "⏰ Prédiction mi-temps solide" : "⏰ Prédiction mi-temps incertaine";
+                    }} else if (nom.includes('handicap')) {{
+                        return cote < 2.0 ? "⚖️ Handicap avantageux" : "⚖️ Handicap risqué";
+                    }} else if (nom.includes('plus de') || nom.includes('moins de')) {{
+                        return cote < 1.8 ? "📊 Prédiction totaux très fiable" : "📊 Prédiction totaux modérée";
+                    }}
+
+                    return cote < 2.0 ? "✅ Prédiction favorable" : "⚠️ Prédiction risquée";
+                }}
+
+                // Initialiser le premier graphique et les prédictions
                 document.addEventListener('DOMContentLoaded', function() {{
                     createChart('stats');
+                    organizePredictions();
                     startAutoRefreshDetails();
                 }});
 
