@@ -615,6 +615,10 @@ def match_details(match_id):
         contexte_quantique = {'score1': score1, 'score2': score2, 'minute': minute}
         prediction_quantique = systeme_quantique.analyser_match_quantique(team1, team2, league, odds_data, contexte_quantique)
 
+        # 🤝 ALLIANCE DE TOUS LES SYSTÈMES
+        alliance = AllianceSystemesPrediction(team1, team2, league, odds_data, paris_alternatifs_filtres, score1, score2, minute)
+        rapport_alliance = alliance.generer_alliance_complete()
+
         # HTML pour les value bets avec calculateur de mise
         value_bets_html = ""
         if value_bets:
@@ -705,6 +709,61 @@ def match_details(match_id):
                 🌀 {prediction_quantique['facteurs_quantiques']['patterns_detectes']} Patterns Quantiques |
                 🤖 {prediction_quantique['facteurs_quantiques']['algorithmes_utilises']} Algorithmes ML |
                 📊 {prediction_quantique['facteurs_quantiques']['dimensions_analysees']} Dimensions
+            </div>
+        </div>"""
+
+        # HTML pour l'Alliance de tous les systèmes
+        alliance_html = f"""
+        <div style='background: linear-gradient(135deg, #ff6b6b 0%, #4ecdc4 25%, #45b7d1 50%, #96ceb4 75%, #feca57 100%); color: white; padding: 30px; border-radius: 20px; margin: 25px 0; box-shadow: 0 15px 40px rgba(0,0,0,0.4); border: 3px solid #fff;'>
+            <h3 style='text-align: center; font-size: 28px; margin-bottom: 25px; text-shadow: 2px 2px 4px rgba(0,0,0,0.5);'>🤝 ALLIANCE DE TOUS LES SYSTÈMES</h3>
+
+            <div style='display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 20px; margin-bottom: 25px;'>
+                <div style='text-align: center; background: rgba(255,255,255,0.15); padding: 20px; border-radius: 15px; backdrop-filter: blur(10px);'>
+                    <div style='font-size: 42px; font-weight: bold; margin-bottom: 10px; text-shadow: 1px 1px 2px rgba(0,0,0,0.5);'>{rapport_alliance['score_alliance']}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>SCORE ALLIANCE</div>
+                </div>
+                <div style='text-align: center; background: rgba(255,255,255,0.15); padding: 20px; border-radius: 15px; backdrop-filter: blur(10px);'>
+                    <div style='font-size: 18px; font-weight: bold; margin-bottom: 10px;'>{rapport_alliance['systeme_dominant']}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>SYSTÈME DOMINANT</div>
+                </div>
+                <div style='text-align: center; background: rgba(255,255,255,0.15); padding: 20px; border-radius: 15px; backdrop-filter: blur(10px);'>
+                    <div style='font-size: 18px; font-weight: bold; margin-bottom: 10px;'>{rapport_alliance['convergence']}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>CONVERGENCE</div>
+                </div>
+                <div style='text-align: center; background: rgba(255,255,255,0.15); padding: 20px; border-radius: 15px; backdrop-filter: blur(10px);'>
+                    <div style='font-size: 18px; font-weight: bold; margin-bottom: 10px;'>{rapport_alliance['meta']['systemes_actifs']}</div>
+                    <div style='font-size: 14px; opacity: 0.9;'>SYSTÈMES ACTIFS</div>
+                </div>
+            </div>
+
+            <div style='background: rgba(0,0,0,0.3); padding: 20px; border-radius: 15px; margin-bottom: 20px; text-align: center;'>
+                <div style='font-size: 24px; font-weight: bold; margin-bottom: 10px;'>{rapport_alliance['prediction_alliance']}</div>
+                <div style='font-size: 18px; margin-bottom: 15px;'>{rapport_alliance['niveau_alliance']}</div>
+                <div style='font-size: 16px; background: rgba(255,255,255,0.2); padding: 10px; border-radius: 8px;'>
+                    💰 {rapport_alliance['recommandation']}
+                </div>
+            </div>
+
+            <div style='display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; font-size: 14px;'>
+                <div style='background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px;'>
+                    <strong>🚀 Quantique:</strong><br>
+                    {rapport_alliance['details_systemes']['quantique']['prediction']}<br>
+                    <span style='color: #ffd700;'>Confiance: {rapport_alliance['details_systemes']['quantique']['confiance']}%</span>
+                </div>
+                <div style='background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px;'>
+                    <strong>🎯 Unifié 1X2:</strong><br>
+                    {rapport_alliance['details_systemes']['unifie_1x2']['prediction']}<br>
+                    <span style='color: #ffd700;'>Confiance: {rapport_alliance['details_systemes']['unifie_1x2']['confiance']}%</span>
+                </div>
+                <div style='background: rgba(255,255,255,0.1); padding: 15px; border-radius: 10px;'>
+                    <strong>🤖 IA Multi:</strong><br>
+                    {rapport_alliance['details_systemes']['ia_multi']['prediction']}<br>
+                    <span style='color: #ffd700;'>Confiance: {rapport_alliance['details_systemes']['ia_multi']['confiance']:.1f}%</span>
+                </div>
+            </div>
+
+            <div style='margin-top: 20px; text-align: center; font-size: 12px; opacity: 0.8;'>
+                🌟 Méthode: {rapport_alliance['meta']['methode']} | Version: {rapport_alliance['meta']['version']}
             </div>
         </div>"""
         # HTML avec tableau des paris alternatifs
@@ -806,6 +865,7 @@ def match_details(match_id):
                 <p><b>Ligue :</b> {league} | <b>Sport :</b> {sport}</p>
                 <p><b>Score :</b> {score1} - {score2} | <b>Minute :</b> {minute}'</p>
 
+                {alliance_html}
                 {value_bets_html}
                 {evolution_html}
                 {ia_html}
@@ -4107,6 +4167,219 @@ def generer_predictions_alternatives(team1, team2, league, paris_alternatifs, od
     contexte_temps_reel = f"⏱️ TEMPS RÉEL: {score1}-{score2} ({score1+score2} buts) - {minute}'"
 
     return f"🤖 SYSTÈME UNIFIÉ GÉNÉRAL: {prediction_unifiee_originale} | 🎲 SYSTÈME UNIFIÉ ALTERNATIFS: {decision_alternative} | 📋 VRAIS PARIS DISPONIBLES: {liste_vrais_paris} | {contexte_temps_reel}"
+
+class AllianceSystemesPrediction:
+    """🤝 ALLIANCE DE TOUS LES SYSTÈMES DE PRÉDICTION - UNIFICATION TOTALE"""
+
+    def __init__(self, team1, team2, league, odds_data, paris_alternatifs, score1=0, score2=0, minute=0):
+        self.team1 = team1
+        self.team2 = team2
+        self.league = league
+        self.odds_data = odds_data
+        self.paris_alternatifs = paris_alternatifs
+        self.score1 = score1
+        self.score2 = score2
+        self.minute = minute
+
+        # Initialisation de tous les systèmes
+        self.systeme_unifie_1x2 = SystemePredictionUnifie(team1, team2, league, odds_data, "Football", paris_alternatifs)
+        self.systeme_alternatifs = SystemePredictionParisAlternatifs(team1, team2, league, paris_alternatifs, "Football", score1, score2, minute)
+        self.systeme_quantique = SystemePredictionQuantique()
+
+    def generer_alliance_complete(self):
+        """🌟 GÉNÉRATION DE L'ALLIANCE COMPLÈTE DE TOUS LES SYSTÈMES"""
+
+        # 1. SYSTÈME UNIFIÉ 1X2
+        prediction_1x2 = self.systeme_unifie_1x2.generer_prediction_unifiee()
+        confiance_1x2 = self._extraire_confiance(prediction_1x2)
+
+        # 2. SYSTÈME PARIS ALTERNATIFS
+        prediction_alt = self.systeme_alternatifs.generer_decision_collective_alternative()
+        confiance_alt = self._extraire_confiance(prediction_alt)
+
+        # 3. SYSTÈME QUANTIQUE
+        contexte_quantique = {'score1': self.score1, 'score2': self.score2, 'minute': self.minute}
+        prediction_quantique = self.systeme_quantique.analyser_match_quantique(
+            self.team1, self.team2, self.league, self.odds_data, contexte_quantique
+        )
+        confiance_quantique = prediction_quantique['prediction_finale']['confiance']
+
+        # 4. IA MULTI-FACTEURS
+        ia_analyse = ia_prediction_multi_facteurs(self.team1, self.team2, self.league, self.odds_data, self.score1, self.score2, self.minute)
+        confiance_ia = ia_analyse['score_final']
+
+        # 5. VALUE BETTING
+        value_bets = detecter_value_bets(self.paris_alternatifs, self.odds_data)
+        score_value = len(value_bets) * 15 if value_bets else 30
+
+        # 6. PROBABILITÉS VRAIES COTES
+        probabilites = calculer_probabilites_depuis_cotes(self.odds_data)
+        prob_max = max(probabilites.values()) if probabilites else 50
+
+        # 7. FUSION EN ALLIANCE
+        alliance_result = self._fusionner_tous_systemes(
+            prediction_1x2, confiance_1x2,
+            prediction_alt, confiance_alt,
+            prediction_quantique, confiance_quantique,
+            ia_analyse, confiance_ia,
+            value_bets, score_value,
+            probabilites, prob_max
+        )
+
+        return alliance_result
+
+    def _extraire_confiance(self, prediction_text):
+        """Extrait la confiance d'une prédiction textuelle"""
+        import re
+
+        # Recherche de pourcentages dans le texte
+        matches = re.findall(r'(\d+)%', str(prediction_text))
+        if matches:
+            return int(matches[0])
+
+        # Recherche de mots-clés de confiance
+        text_lower = str(prediction_text).lower()
+        if 'très élevée' in text_lower or 'excellent' in text_lower:
+            return 90
+        elif 'élevée' in text_lower or 'favorable' in text_lower:
+            return 80
+        elif 'modérée' in text_lower or 'correct' in text_lower:
+            return 70
+        elif 'faible' in text_lower or 'prudent' in text_lower:
+            return 60
+        else:
+            return 75  # Défaut
+
+    def _fusionner_tous_systemes(self, pred_1x2, conf_1x2, pred_alt, conf_alt,
+                                pred_quantique, conf_quantique, ia_analyse, conf_ia,
+                                value_bets, score_value, probabilites, prob_max):
+        """🌟 FUSION INTELLIGENTE DE TOUS LES SYSTÈMES EN ALLIANCE"""
+
+        # Pondération des systèmes selon leur fiabilité
+        poids = {
+            'quantique': 0.30,      # Le plus avancé
+            'unifie_1x2': 0.25,    # Très fiable
+            'ia_multi': 0.20,      # Sophistiqué
+            'probabilites': 0.15,  # Base solide
+            'alternatifs': 0.05,   # Spécialisé
+            'value_betting': 0.05  # Opportunités
+        }
+
+        # Calcul du score d'alliance pondéré
+        score_alliance = (
+            conf_quantique * poids['quantique'] +
+            conf_1x2 * poids['unifie_1x2'] +
+            conf_ia * poids['ia_multi'] +
+            prob_max * poids['probabilites'] +
+            conf_alt * poids['alternatifs'] +
+            score_value * poids['value_betting']
+        )
+
+        # Détermination de la prédiction dominante
+        predictions_systemes = [
+            {'systeme': 'Quantique', 'prediction': pred_quantique['prediction_finale']['resultat'], 'confiance': conf_quantique, 'poids': poids['quantique']},
+            {'systeme': 'Unifié 1X2', 'prediction': pred_1x2, 'confiance': conf_1x2, 'poids': poids['unifie_1x2']},
+            {'systeme': 'IA Multi-Facteurs', 'prediction': ia_analyse['recommandation'], 'confiance': conf_ia, 'poids': poids['ia_multi']},
+        ]
+
+        # Score pondéré pour chaque prédiction
+        for pred in predictions_systemes:
+            pred['score_pondere'] = pred['confiance'] * pred['poids']
+
+        # Prédiction dominante
+        prediction_dominante = max(predictions_systemes, key=lambda x: x['score_pondere'])
+
+        # Niveau de confiance de l'alliance
+        if score_alliance >= 85:
+            niveau_alliance = "🔥 ALLIANCE ULTRA PUISSANTE"
+            recommandation = "MISE FORTE - TOUS SYSTÈMES ALIGNÉS"
+        elif score_alliance >= 75:
+            niveau_alliance = "⚡ ALLIANCE TRÈS FORTE"
+            recommandation = "MISE RECOMMANDÉE - CONSENSUS ÉLEVÉ"
+        elif score_alliance >= 65:
+            niveau_alliance = "✨ ALLIANCE FORTE"
+            recommandation = "MISE MODÉRÉE - BON CONSENSUS"
+        elif score_alliance >= 55:
+            niveau_alliance = "💫 ALLIANCE MODÉRÉE"
+            recommandation = "MISE PRUDENTE - CONSENSUS PARTIEL"
+        else:
+            niveau_alliance = "🌟 ALLIANCE FAIBLE"
+            recommandation = "ÉVITER - PAS DE CONSENSUS"
+
+        # Analyse de convergence
+        convergence = self._analyser_convergence(predictions_systemes)
+
+        # Rapport final de l'alliance
+        rapport_alliance = {
+            'prediction_alliance': prediction_dominante['prediction'],
+            'score_alliance': round(score_alliance, 1),
+            'niveau_alliance': niveau_alliance,
+            'recommandation': recommandation,
+            'systeme_dominant': prediction_dominante['systeme'],
+            'convergence': convergence,
+            'details_systemes': {
+                'quantique': {'prediction': pred_quantique['prediction_finale']['resultat'], 'confiance': conf_quantique},
+                'unifie_1x2': {'prediction': pred_1x2, 'confiance': conf_1x2},
+                'ia_multi': {'prediction': ia_analyse['recommandation'], 'confiance': conf_ia},
+                'probabilites': {'max_prob': prob_max, 'repartition': probabilites},
+                'value_betting': {'opportunites': len(value_bets), 'score': score_value}
+            },
+            'poids_systemes': poids,
+            'meta': {
+                'systemes_actifs': 6,
+                'methode': 'ALLIANCE_COMPLETE',
+                'version': 'ALLIANCE-PRO-2024'
+            }
+        }
+
+        return rapport_alliance
+
+    def _analyser_convergence(self, predictions_systemes):
+        """Analyse la convergence entre les systèmes"""
+
+        # Compter les prédictions similaires
+        predictions_text = [pred['prediction'] for pred in predictions_systemes]
+
+        # Analyse de convergence simple
+        convergence_count = 0
+        total_comparisons = 0
+
+        for i in range(len(predictions_text)):
+            for j in range(i + 1, len(predictions_text)):
+                total_comparisons += 1
+                # Vérification de similarité (mots-clés communs)
+                if self._predictions_similaires(predictions_text[i], predictions_text[j]):
+                    convergence_count += 1
+
+        taux_convergence = (convergence_count / total_comparisons * 100) if total_comparisons > 0 else 0
+
+        if taux_convergence >= 80:
+            return "🎯 CONVERGENCE EXCELLENTE"
+        elif taux_convergence >= 60:
+            return "✅ CONVERGENCE BONNE"
+        elif taux_convergence >= 40:
+            return "⚠️ CONVERGENCE MODÉRÉE"
+        else:
+            return "❌ DIVERGENCE"
+
+    def _predictions_similaires(self, pred1, pred2):
+        """Vérifie si deux prédictions sont similaires"""
+        pred1_lower = str(pred1).lower()
+        pred2_lower = str(pred2).lower()
+
+        # Mots-clés de victoire équipe 1
+        mots_equipe1 = ['victoire', self.team1.lower(), 'équipe 1', 'team1']
+        # Mots-clés de victoire équipe 2
+        mots_equipe2 = ['victoire', self.team2.lower(), 'équipe 2', 'team2']
+        # Mots-clés de match nul
+        mots_nul = ['nul', 'égalité', 'draw']
+
+        # Vérification de similarité
+        for mots in [mots_equipe1, mots_equipe2, mots_nul]:
+            if any(mot in pred1_lower for mot in mots) and any(mot in pred2_lower for mot in mots):
+                return True
+
+        return False
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
