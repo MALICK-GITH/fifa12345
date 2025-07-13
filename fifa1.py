@@ -772,7 +772,7 @@ def match_details(match_id):
                 'details_systemes': {
                     'quantique': {'prediction': 'Non disponible', 'confiance': 0},
                     'unifie_alternatifs': {'prediction': 'Analyse simplifiée des paris alternatifs', 'confiance': 75},
-                    'ia_multi': {'prediction': ia_analyse['recommandation'], 'confiance': ia_analyse['score_final']},
+                    'ia_multi': {'prediction': ia_analyse.get('bot_name', 'IA Multi'), 'confiance': ia_analyse.get('confiance_globale', 50)},
                     'probabilites': {'max_prob': 50, 'repartition': {'alternatifs': 60, 'totaux': 40}},
                     'value_betting': {'opportunites': len(value_bets), 'score': 60}
                 },
@@ -788,26 +788,59 @@ def match_details(match_id):
         if value_bets:
             value_bets_html = "<div class='value-bet-section'><h3>🎲 OPPORTUNITÉS DÉTECTÉES (VALUE BETTING)</h3>"
             for vb in value_bets:
-                pari = vb['pari']
+                # Adaptation pour la nouvelle structure des bots
+                if isinstance(vb, dict):
+                    # Nouvelle structure des bots alternatifs
+                    if 'nom' in vb:
+                        nom_pari = vb['nom']
+                        cote_pari = vb.get('cote', 0)
+                        confiance = vb.get('confiance', 50)
+                        value_score = vb.get('value', 10)
 
-                # Calculer la mise optimale (bankroll par défaut: 1000€)
-                bankroll_defaut = 1000
-                kelly = calculer_mise_optimale_kelly(bankroll_defaut, vb['prob_reelle'], vb['cote'])
+                        # Calcul des probabilités
+                        prob_bookmaker = (1 / float(cote_pari)) * 100 if cote_pari > 0 else 50
+                        prob_reelle = min(confiance + 10, 95)  # Estimation basée sur la confiance
 
-                value_bets_html += f"""
-                <div class='value-bet-item'>
-                    <div style='display: flex; justify-content: space-between; align-items: center;'>
-                        <div>
-                            <strong>{pari['nom']}</strong><br>
-                            <small>Cote: {vb['cote']} | Prob. Bookmaker: {vb['prob_bookmaker']:.1f}% | Notre Estimation: {vb['prob_reelle']:.1f}%</small>
-                        </div>
-                        <div class='value-percentage'>+{vb['valeur']:.1f}%</div>
-                    </div>
-                    <div style='margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.2); border-radius: 4px;'>
-                        🎯 <strong>{vb['recommandation']}</strong> - Valeur positive détectée !<br>
-                        💰 <strong>Mise optimale (Kelly):</strong> {kelly['mise_recommandee']}€ ({kelly['pourcentage_bankroll']}% du bankroll) - {kelly['recommandation']}
-                    </div>
-                </div>"""
+                        # Calculer la mise optimale (bankroll par défaut: 1000€)
+                        bankroll_defaut = 1000
+                        kelly = calculer_mise_optimale_kelly(bankroll_defaut, prob_reelle, float(cote_pari))
+
+                        value_bets_html += f"""
+                        <div class='value-bet-item'>
+                            <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                <div>
+                                    <strong>{nom_pari}</strong><br>
+                                    <small>Cote: {cote_pari} | Prob. Bookmaker: {prob_bookmaker:.1f}% | Notre Estimation: {prob_reelle:.1f}%</small>
+                                </div>
+                                <div class='value-percentage'>+{value_score:.1f}%</div>
+                            </div>
+                            <div style='margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.2); border-radius: 4px;'>
+                                🎯 <strong>OPPORTUNITÉ VALUE</strong> - Valeur positive détectée !<br>
+                                💰 <strong>Mise optimale (Kelly):</strong> {kelly['mise_recommandee']}€ ({kelly['pourcentage_bankroll']}% du bankroll) - {kelly['recommandation']}
+                            </div>
+                        </div>"""
+                    # Ancienne structure (compatibilité)
+                    elif 'pari' in vb:
+                        pari = vb['pari']
+
+                        # Calculer la mise optimale (bankroll par défaut: 1000€)
+                        bankroll_defaut = 1000
+                        kelly = calculer_mise_optimale_kelly(bankroll_defaut, vb['prob_reelle'], vb['cote'])
+
+                        value_bets_html += f"""
+                        <div class='value-bet-item'>
+                            <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                <div>
+                                    <strong>{pari['nom']}</strong><br>
+                                    <small>Cote: {vb['cote']} | Prob. Bookmaker: {vb['prob_bookmaker']:.1f}% | Notre Estimation: {vb['prob_reelle']:.1f}%</small>
+                                </div>
+                                <div class='value-percentage'>+{vb['valeur']:.1f}%</div>
+                            </div>
+                            <div style='margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.2); border-radius: 4px;'>
+                                🎯 <strong>{vb['recommandation']}</strong> - Valeur positive détectée !<br>
+                                💰 <strong>Mise optimale (Kelly):</strong> {kelly['mise_recommandee']}€ ({kelly['pourcentage_bankroll']}% du bankroll) - {kelly['recommandation']}
+                            </div>
+                        </div>"""
             value_bets_html += "</div>"
         else:
             value_bets_html = "<div style='background: #f39c12; color: white; padding: 15px; border-radius: 8px; margin: 20px 0;'>⚠️ Aucune opportunité de value betting détectée pour le moment</div>"
@@ -830,19 +863,19 @@ def match_details(match_id):
             <h3>🤖 IA PRÉDICTIVE MULTI-FACTEURS</h3>
             <div style='display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 15px;'>
                 <div>
-                    <div style='font-size: 36px; font-weight: bold; text-align: center;'>{ia_analyse['score_final']}/100</div>
+                    <div style='font-size: 36px; font-weight: bold; text-align: center;'>{ia_analyse.get('confiance_globale', 50)}/100</div>
                     <div style='text-align: center; margin-top: 10px;'>
-                        <strong>Confiance: {ia_analyse['confiance']}</strong><br>
+                        <strong>Bot: {ia_analyse.get('bot_name', 'IA Multi')}</strong><br>
                         <span style='background: rgba(255,255,255,0.2); padding: 5px 10px; border-radius: 15px; font-size: 14px;'>
-                            {ia_analyse['recommandation']}
+                            {ia_analyse.get('specialite', 'Analyse IA')}
                         </span>
                     </div>
                 </div>
                 <div>
-                    <div style='margin-bottom: 8px;'>📊 Cotes: {ia_analyse['facteurs']['cotes']}/100</div>
-                    <div style='margin-bottom: 8px;'>⏱️ Temps Réel: {ia_analyse['facteurs']['temps_reel']}/100</div>
-                    <div style='margin-bottom: 8px;'>⚽ Équipes: {ia_analyse['facteurs']['equipes']}/100</div>
-                    <div style='margin-bottom: 8px;'>🌟 Conditions: {ia_analyse['facteurs']['conditions']}/100</div>
+                    <div style='margin-bottom: 8px;'>🎲 Paris Analysés: {len(ia_analyse.get('paris_recommandes', []))}</div>
+                    <div style='margin-bottom: 8px;'>💰 Confiance Globale: {ia_analyse.get('confiance_globale', 50)}%</div>
+                    <div style='margin-bottom: 8px;'>🎯 Spécialité: {ia_analyse.get('specialite', 'IA Multi')}</div>
+                    <div style='margin-bottom: 8px;'>🤖 Bot: {ia_analyse.get('bot_name', 'IA Alternatifs')}</div>
                 </div>
             </div>
         </div>"""
@@ -2912,8 +2945,11 @@ def ia_prediction_multi_facteurs(team1, team2, league, odds_data, score1=0, scor
 
     return {
         'score_final': round(score_final, 1),
+        'confiance_globale': round(score_final, 1),  # Compatibilité avec nouveaux bots
         'confiance': confiance,
         'recommandation': recommandation,
+        'bot_name': 'IA MULTI-FACTEURS',
+        'specialite': 'ANALYSE MULTI-FACTEURS AVANCÉE',
         'facteurs': {
             'cotes': round(score_cotes, 1),
             'temps_reel': round(score_temps_reel, 1),
@@ -3647,8 +3683,16 @@ class SystemePredictionParisAlternatifs:
 
     def _analyse_totaux(self, option):
         """Système spécialisé pour l'analyse des totaux - PREND EN COMPTE LE SCORE ACTUEL"""
-        pari = option['pari']
-        nom = pari.get('nom', '').lower()
+        # Vérification de sécurité pour la structure
+        if 'pari' in option:
+            pari = option['pari']
+            nom = pari.get('nom', '').lower()
+        elif 'nom' in option:
+            # Nouvelle structure directe
+            nom = option.get('nom', '').lower()
+            pari = option
+        else:
+            return {'probabilite': 50, 'recommandation': 'neutre', 'details': 'Structure inconnue'}
 
         # ANALYSE TEMPS RÉEL : Score actuel + prédiction du reste du match
         buts_restants_team1 = 0
@@ -3727,8 +3771,15 @@ class SystemePredictionParisAlternatifs:
 
     def _analyse_handicaps(self, option):
         """Système spécialisé pour l'analyse des handicaps"""
-        pari = option['pari']
-        nom = pari.get('nom', '').lower()
+        # Vérification de sécurité pour la structure
+        if 'pari' in option:
+            pari = option['pari']
+            nom = pari.get('nom', '').lower()
+        elif 'nom' in option:
+            nom = option.get('nom', '').lower()
+            pari = option
+        else:
+            return {'probabilite': 50, 'recommandation': 'neutre', 'details': 'Structure inconnue'}
 
         # Analyser la différence de force entre les équipes
         force_team1 = sum(self.force1)
@@ -3763,8 +3814,15 @@ class SystemePredictionParisAlternatifs:
 
     def _analyse_corners(self, option):
         """Système spécialisé pour l'analyse des corners - PREND EN COMPTE LE TEMPS DE JEU"""
-        pari = option['pari']
-        nom = pari.get('nom', '').lower()
+        # Vérification de sécurité pour la structure
+        if 'pari' in option:
+            pari = option['pari']
+            nom = pari.get('nom', '').lower()
+        elif 'nom' in option:
+            nom = option.get('nom', '').lower()
+            pari = option
+        else:
+            return {'probabilite': 50, 'recommandation': 'neutre', 'details': 'Structure inconnue'}
 
         # Les corners dépendent du style offensif des équipes
         style1 = self._analyser_style_jeu(self.team1, self.force1)
@@ -3824,8 +3882,15 @@ class SystemePredictionParisAlternatifs:
 
     def _analyse_forme_alternative(self, option):
         """Système spécialisé pour l'analyse de forme alternative"""
-        pari = option['pari']
-        categorie = option['categorie']
+        # Vérification de sécurité pour la structure
+        if 'pari' in option:
+            pari = option['pari']
+        elif 'nom' in option:
+            pari = option
+        else:
+            return {'probabilite': 50, 'recommandation': 'neutre', 'details': 'Structure inconnue'}
+
+        categorie = option.get('categorie', 'autre')
 
         # Analyser selon la catégorie
         if categorie == 'pair_impair':
@@ -3929,7 +3994,14 @@ class SystemePredictionParisAlternatifs:
             return "❌ AUCUN CONSENSUS SUR LES PARIS ALTERNATIFS"
 
         option = decision['option_finale']
-        pari = option['pari']
+        # Vérification de sécurité pour la structure
+        if 'pari' in option:
+            pari = option['pari']
+        elif 'nom' in option:
+            pari = option
+        else:
+            return "❌ STRUCTURE DE DONNÉES INVALIDE"
+
         type_decision = decision['type_decision']
         confiance = decision['confiance_collective']
 
@@ -4431,7 +4503,7 @@ class AllianceSystemesPrediction:
 
         # 4. IA MULTI-FACTEURS
         ia_analyse = ia_prediction_multi_facteurs(self.team1, self.team2, self.league, self.odds_data, self.score1, self.score2, self.minute)
-        confiance_ia = ia_analyse['score_final']
+        confiance_ia = ia_analyse.get('confiance_globale', 50)
 
         # 5. VALUE BETTING
         value_bets = detecter_value_bets(self.paris_alternatifs, self.odds_data)
