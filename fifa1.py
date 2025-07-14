@@ -152,15 +152,46 @@ def home():
                 is_finished = False
                 is_upcoming = False
 
-                # Logique basée sur HS et autres indicateurs
-                if hs == 1 or "live" in cps.lower() or (minute is not None and minute > 0):
-                    statut = f"En cours ({minute}′)" if minute else "En cours"
-                    is_live = True
-                elif hs == 3 or "terminé" in tn or "finished" in tns.lower() or "final" in cps.lower():
-                    statut = "Terminé"
+                # 🎮 LOGIQUE STATUTS FIFA CORRIGÉE AVEC VÉRIFICATION HEURE
+                from datetime import datetime
+
+                # Vérifier si le match est dans le futur
+                maintenant = datetime.now()
+                heure_match = None
+
+                # Extraire l'heure du match depuis match_time (déjà calculé)
+                try:
+                    if match_time and match_time != "–":
+                        # Format: "14/07/2025 23:00"
+                        heure_match = datetime.strptime(match_time, "%d/%m/%Y %H:%M")
+                except:
+                    heure_match = None
+
+                # 🕐 LOGIQUE DE STATUT AVEC VÉRIFICATION TEMPORELLE
+                if hs == 3 or "terminé" in tn or "finished" in tns.lower() or "final" in cps.lower() or (minute is not None and minute >= 90):
+                    # Match terminé
+                    statut = "TERMINÉ"
                     is_finished = True
-                elif hs == 0 or statut == "À venir":
+                    is_live = False
+                    is_upcoming = False
+                elif heure_match and heure_match > maintenant:
+                    # 🎯 MATCH DANS LE FUTUR - PAS ENCORE DÉBUTÉ
+                    statut = "PAS DÉBUTÉ"
                     is_upcoming = True
+                    is_live = False
+                    is_finished = False
+                elif hs == 1 or "live" in cps.lower() or (minute is not None and minute > 0):
+                    # Match en cours
+                    statut = f"EN COURS ({minute}′)" if minute else "EN COURS"
+                    is_live = True
+                    is_finished = False
+                    is_upcoming = False
+                else:
+                    # Match pas encore débuté (fallback)
+                    statut = "PAS DÉBUTÉ"
+                    is_upcoming = True
+                    is_live = False
+                    is_finished = False
 
                 if selected_sport and sport != selected_sport:
                     continue
@@ -174,7 +205,8 @@ def home():
                     continue
 
                 match_ts = match.get("S", 0)
-                match_time = datetime.datetime.fromtimestamp(match_ts, datetime.timezone.utc).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
+                from datetime import timezone
+                match_time = datetime.fromtimestamp(match_ts, timezone.utc).strftime('%d/%m/%Y %H:%M') if match_ts else "–"
 
                 # --- Cotes ---
                 odds_data = []
@@ -556,6 +588,34 @@ def match_details(match_id):
             minute = int(minute) if minute is not None else 0
         except (ValueError, TypeError):
             minute = 0
+
+        # 🎮 CALCUL DU STATUT DU MATCH FIFA AVEC VÉRIFICATION HEURE
+        from datetime import datetime
+
+        # Vérifier si le match est dans le futur (basé sur l'heure de début calculée)
+        maintenant = datetime.now()
+
+        # Dans la logique des heures, on a déjà calculé heure_debut
+        # Si le match n'a pas encore commencé selon l'heure
+        if minute >= 90:
+            statut_match = "TERMINÉ"
+        elif minute > 0:
+            # Vérifier si l'heure de début est dans le futur
+            try:
+                # Si on a une heure de début dans le futur, c'est que le match n'a pas commencé
+                if 'heure_debut' in locals() and isinstance(heure_debut, str):
+                    # Reconvertir pour vérification
+                    heure_debut_dt = datetime.strptime(f"{maintenant.strftime('%Y-%m-%d')} {heure_debut}", "%Y-%m-%d %H:%M:%S")
+                    if heure_debut_dt > maintenant:
+                        statut_match = "PAS DÉBUTÉ"
+                    else:
+                        statut_match = f"EN COURS ({minute}′)"
+                else:
+                    statut_match = f"EN COURS ({minute}′)"
+            except:
+                statut_match = f"EN COURS ({minute}′)"
+        else:
+            statut_match = "PAS DÉBUTÉ"
 
         # 🎮 CALCUL DES HEURES POUR MATCH FIFA (HEURE DÉBUT FIXE)
         from datetime import datetime, timedelta
@@ -1181,6 +1241,142 @@ def match_details(match_id):
                 .badge-high {{ background: #27ae60; }}
                 .badge-medium {{ background: #f39c12; }}
                 .badge-low {{ background: #e74c3c; }}
+
+                /* 📱 RESPONSIVE POUR PAGE DÉTAILS ANDROID */
+                @media (max-width: 800px) {{
+                    .container {{ padding: 10px; }}
+                    h2 {{ font-size: 20px; margin: 10px 0; }}
+
+                    /* Informations du match */
+                    p {{ font-size: 14px; line-height: 1.4; }}
+
+                    /* Heures de match responsive */
+                    div[style*="grid-template-columns: 1fr 1fr 1fr"] {{
+                        display: flex !important;
+                        flex-direction: column !important;
+                        gap: 10px !important;
+                    }}
+
+                    /* Tableaux responsive */
+                    .stats-table, .alt-table {{
+                        font-size: 12px;
+                        overflow-x: auto;
+                        display: block;
+                        white-space: nowrap;
+                    }}
+
+                    .stats-table th, .stats-table td,
+                    .alt-table th, .alt-table td {{
+                        padding: 8px 4px;
+                        font-size: 11px;
+                    }}
+
+                    /* Onglets responsive */
+                    .chart-tabs, .prediction-tabs {{
+                        flex-wrap: wrap;
+                        gap: 5px;
+                    }}
+
+                    .tab-btn, .pred-tab-btn {{
+                        padding: 8px 12px;
+                        font-size: 12px;
+                        margin: 2px;
+                    }}
+
+                    /* Graphiques responsive */
+                    .chart-container {{
+                        padding: 10px;
+                        overflow-x: auto;
+                    }}
+
+                    /* Cartes de stats */
+                    .chart-stats {{
+                        grid-template-columns: 1fr 1fr !important;
+                        gap: 10px;
+                    }}
+
+                    .stat-card {{
+                        padding: 10px;
+                    }}
+
+                    .stat-value {{
+                        font-size: 18px;
+                    }}
+
+                    /* Prédictions responsive */
+                    .prediction-summary {{
+                        padding: 15px;
+                        margin-top: 15px;
+                    }}
+
+                    .prediction-item {{
+                        flex-direction: column;
+                        align-items: flex-start;
+                        gap: 5px;
+                    }}
+
+                    /* Boutons responsive */
+                    .sim-btn {{
+                        padding: 10px 15px;
+                        margin: 5px;
+                        font-size: 14px;
+                    }}
+
+                    /* Auto-refresh indicator */
+                    .auto-refresh-indicator {{
+                        font-size: 12px;
+                        padding: 6px 12px;
+                        top: 5px;
+                        right: 5px;
+                    }}
+
+                    /* Bouton retour */
+                    .back-btn {{
+                        font-size: 14px;
+                        padding: 8px 15px;
+                    }}
+                }}
+
+                /* 📱 TRÈS PETITS ÉCRANS (< 480px) */
+                @media (max-width: 480px) {{
+                    .container {{ padding: 5px; }}
+                    h2 {{ font-size: 18px; }}
+
+                    /* Stats en une colonne */
+                    .chart-stats {{
+                        grid-template-columns: 1fr !important;
+                    }}
+
+                    /* Tableaux en scroll horizontal */
+                    .stats-table, .alt-table {{
+                        font-size: 10px;
+                    }}
+
+                    .stats-table th, .stats-table td,
+                    .alt-table th, .alt-table td {{
+                        padding: 6px 3px;
+                        font-size: 10px;
+                    }}
+
+                    /* Onglets plus petits */
+                    .tab-btn, .pred-tab-btn {{
+                        padding: 6px 8px;
+                        font-size: 11px;
+                    }}
+
+                    /* Prédictions plus compactes */
+                    .prediction-summary {{
+                        padding: 10px;
+                        font-size: 14px;
+                    }}
+
+                    .sim-btn {{
+                        padding: 8px 12px;
+                        font-size: 12px;
+                        width: 100%;
+                        margin: 3px 0;
+                    }}
+                }}
             </style>
         </head><body>
             <!-- Indicateur de refresh automatique -->
@@ -1192,7 +1388,7 @@ def match_details(match_id):
                 <a href="/" class="back-btn">&larr; Retour à la liste</a>
                 <h2>⚽ {team1} vs {team2}</h2>
                 <p><b>Ligue :</b> {league} | <b>Sport :</b> {sport}</p>
-                <p><b>Score :</b> {score1} - {score2} | <b>Minute :</b> {minute}'</p>
+                <p><b>Score :</b> {score1} - {score2} | <b>Statut :</b> {statut_match}</p>
 
                 <!-- 🕐 HEURES DE COMMENCEMENT ET FIN -->
                 <div style='background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); padding: 15px; border-radius: 10px; margin: 15px 0; color: white; text-align: center;'>
@@ -2454,26 +2650,131 @@ TEMPLATE = """<!DOCTYPE html>
         .pagination button { padding: 14px 24px; margin: 0 6px; font-size: 18px; border: none; background: #2980b9; color: #fff; border-radius: 6px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
         .pagination button:disabled { background: #b2bec3; color: #636e72; cursor: not-allowed; }
         .pagination button:focus { outline: 2px solid #27ae60; }
-        /* Responsive */
+        /* 📱 RESPONSIVE OPTIMISÉ POUR ANDROID */
         @media (max-width: 800px) {
+            body { padding: 10px; font-size: 14px; }
+            h2 { font-size: 20px; margin: 10px 0; }
+
+            /* Formulaires optimisés mobile */
+            form { margin-bottom: 15px; }
+            select {
+                padding: 15px;
+                margin: 5px;
+                font-size: 16px;
+                width: 100%;
+                max-width: 200px;
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                appearance: none;
+            }
+
+            /* Tableau en cartes pour mobile */
             table, thead, tbody, th, td, tr { display: block; }
             th { position: absolute; left: -9999px; top: -9999px; }
-            tr { margin-bottom: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 6px #ccc; }
-            td { border: none; border-bottom: 1px solid #eee; position: relative; padding-left: 50%; min-height: 40px; font-size: 16px; }
-            td:before { position: absolute; top: 10px; left: 10px; width: 45%; white-space: nowrap; font-weight: bold; color: #2980b9; }
-            td:nth-of-type(1):before { content: 'Équipe 1'; }
-            td:nth-of-type(2):before { content: 'Score 1'; }
-            td:nth-of-type(3):before { content: 'Score 2'; }
-            td:nth-of-type(4):before { content: 'Équipe 2'; }
-            td:nth-of-type(5):before { content: 'Sport'; }
-            td:nth-of-type(6):before { content: 'Ligue'; }
-            td:nth-of-type(7):before { content: 'Statut'; }
-            td:nth-of-type(8):before { content: 'Date & Heure'; }
-            td:nth-of-type(9):before { content: 'Température'; }
-            td:nth-of-type(10):before { content: 'Humidité'; }
-            td:nth-of-type(11):before { content: 'Cotes'; }
-            td:nth-of-type(12):before { content: 'Prédiction'; }
-            td:nth-of-type(13):before { content: 'Détails'; }
+            tr {
+                margin-bottom: 20px;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                padding: 15px;
+                border: 2px solid #e3f2fd;
+            }
+
+            /* Cartes de match optimisées */
+            td {
+                border: none;
+                border-bottom: 1px solid #f0f0f0;
+                position: relative;
+                padding: 12px 5px 12px 45%;
+                min-height: 35px;
+                font-size: 14px;
+                line-height: 1.4;
+                word-wrap: break-word;
+            }
+
+            /* Labels des champs */
+            td:before {
+                position: absolute;
+                top: 12px;
+                left: 10px;
+                width: 40%;
+                white-space: nowrap;
+                font-weight: bold;
+                color: #1976d2;
+                font-size: 12px;
+                text-transform: uppercase;
+            }
+
+            /* Labels spécifiques */
+            td:nth-of-type(1):before { content: '🏠 Équipe 1'; }
+            td:nth-of-type(2):before { content: '⚽ Score 1'; }
+            td:nth-of-type(3):before { content: '⚽ Score 2'; }
+            td:nth-of-type(4):before { content: '🏃 Équipe 2'; }
+            td:nth-of-type(5):before { content: '🏆 Sport'; }
+            td:nth-of-type(6):before { content: '🎮 Ligue'; }
+            td:nth-of-type(7):before { content: '📊 Statut'; }
+            td:nth-of-type(8):before { content: '🕐 Date'; }
+            td:nth-of-type(9):before { content: '🌡️ Temp'; }
+            td:nth-of-type(10):before { content: '💧 Humid'; }
+            td:nth-of-type(11):before { content: '💰 Cotes'; }
+            td:nth-of-type(12):before { content: '🤖 Prédiction'; }
+            td:nth-of-type(13):before { content: '📋 Détails'; }
+
+            /* Boutons optimisés mobile */
+            .pagination button {
+                padding: 12px 20px;
+                margin: 5px;
+                font-size: 16px;
+                min-width: 80px;
+                touch-action: manipulation;
+            }
+
+            /* Prédictions plus lisibles sur mobile */
+            td:nth-of-type(12) {
+                font-size: 12px;
+                line-height: 1.3;
+                padding-right: 10px;
+            }
+
+            /* Statuts avec couleurs */
+            td:nth-of-type(7) { font-weight: bold; }
+        }
+
+        /* 📱 OPTIMISATIONS SPÉCIFIQUES ANDROID */
+        @media (max-width: 480px) {
+            body { padding: 5px; }
+            h2 { font-size: 18px; }
+
+            /* Sélecteurs en pile */
+            select {
+                width: 100%;
+                margin: 3px 0;
+                max-width: none;
+            }
+
+            /* Cartes plus compactes */
+            tr {
+                margin-bottom: 15px;
+                padding: 10px;
+            }
+
+            td {
+                padding: 8px 5px 8px 40%;
+                font-size: 13px;
+            }
+
+            td:before {
+                width: 35%;
+                font-size: 11px;
+                top: 8px;
+            }
+
+            /* Boutons pagination plus petits */
+            .pagination button {
+                padding: 10px 15px;
+                font-size: 14px;
+                min-width: 60px;
+            }
         }
         /* Loader */
         #loader { display: none; position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; background: rgba(255,255,255,0.7); z-index: 9999; justify-content: center; align-items: center; }
