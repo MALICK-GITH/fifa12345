@@ -556,6 +556,103 @@ def match_details(match_id):
             minute = int(minute) if minute is not None else 0
         except (ValueError, TypeError):
             minute = 0
+
+        # 🎮 CALCUL DES HEURES POUR MATCH FIFA (HEURE DÉBUT FIXE)
+        from datetime import datetime, timedelta
+        import os
+        import json
+
+        # Heure actuelle
+        maintenant = datetime.now()
+
+        # 🎮 DURÉES RÉELLES FIFA (CORRECTES)
+        # Détecter le type de match (normal ou penalty)
+        is_penalty_match = "penalty" in league.lower() or "pen" in league.lower() or "shootout" in league.lower()
+
+        if is_penalty_match:
+            # Match FIFA penalty : 1.5 minutes réelles
+            duree_totale_minutes_reelles = 1.5
+            ratio_temps = 1.5 / 90  # 90 minutes FIFA = 1.5 minutes réelles
+        else:
+            # Match FIFA normal : 7 minutes réelles
+            duree_totale_minutes_reelles = 7
+            ratio_temps = 7 / 90  # 90 minutes FIFA = 7 minutes réelles
+
+        # 🕐 SYSTÈME D'HEURE DE DÉBUT FIXE
+        # Créer un ID unique pour ce match
+        match_id = f"{team1}_{team2}_{league}".replace(" ", "_")
+        heures_matches_file = "heures_matches.json"
+
+        # Charger les heures de début sauvegardées
+        heures_matches = {}
+        if os.path.exists(heures_matches_file):
+            try:
+                with open(heures_matches_file, 'r') as f:
+                    heures_matches = json.load(f)
+            except:
+                heures_matches = {}
+
+        # Calculer les minutes réelles écoulées
+        minutes_reelles_ecoulees = minute * ratio_temps
+
+        # Déterminer l'heure de début
+        if match_id in heures_matches and minute > 0:
+            # Utiliser l'heure de début sauvegardée
+            heure_debut = datetime.fromisoformat(heures_matches[match_id])
+        elif minute > 0:
+            # Première fois qu'on voit ce match en cours - calculer et sauvegarder
+            heure_debut = maintenant - timedelta(minutes=minutes_reelles_ecoulees)
+            heures_matches[match_id] = heure_debut.isoformat()
+            # Sauvegarder
+            try:
+                with open(heures_matches_file, 'w') as f:
+                    json.dump(heures_matches, f)
+            except:
+                pass
+        else:
+            # Match pas encore commencé
+            heure_debut = maintenant + timedelta(seconds=30)
+            # Ne pas sauvegarder car le match n'a pas commencé
+
+        # Calculer l'heure de fin
+        heure_fin = heure_debut + timedelta(minutes=duree_totale_minutes_reelles)
+
+        # Calculer la durée écoulée et restante
+        if minute > 0:
+            # Recalculer les minutes réelles basées sur l'heure de début fixe
+            temps_ecoule_reel = maintenant - heure_debut
+            minutes_reelles_ecoulees_actuelles = temps_ecoule_reel.total_seconds() / 60
+
+            if is_penalty_match:
+                duree_match = f"{minute}' FIFA ({minutes_reelles_ecoulees_actuelles:.1f}min / 1.5min)"
+            else:
+                duree_match = f"{minute}' FIFA ({minutes_reelles_ecoulees_actuelles:.1f}min / 7min)"
+        else:
+            if is_penalty_match:
+                duree_match = f"0' FIFA (0min / 1.5min)"
+            else:
+                duree_match = f"0' FIFA (0min / 7min)"
+
+        # Formatage des heures pour l'affichage
+        heure_debut = heure_debut.strftime("%H:%M:%S")
+        heure_fin = heure_fin.strftime("%H:%M:%S")
+
+        # Ajustement si le match est terminé
+        if minute >= 90:
+            if is_penalty_match:
+                duree_match = "TERMINÉ (1.5min)"
+            else:
+                duree_match = "TERMINÉ (7min)"
+            heure_fin = maintenant.strftime("%H:%M:%S")
+
+            # Nettoyer l'entrée du match terminé
+            if match_id in heures_matches:
+                del heures_matches[match_id]
+                try:
+                    with open(heures_matches_file, 'w') as f:
+                        json.dump(heures_matches, f)
+                except:
+                    pass
         # Statistiques avancées (structure corrigée)
         stats = []
         sc = match.get("SC", {})
@@ -1096,6 +1193,24 @@ def match_details(match_id):
                 <h2>⚽ {team1} vs {team2}</h2>
                 <p><b>Ligue :</b> {league} | <b>Sport :</b> {sport}</p>
                 <p><b>Score :</b> {score1} - {score2} | <b>Minute :</b> {minute}'</p>
+
+                <!-- 🕐 HEURES DE COMMENCEMENT ET FIN -->
+                <div style='background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); padding: 15px; border-radius: 10px; margin: 15px 0; color: white; text-align: center;'>
+                    <div style='display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; align-items: center;'>
+                        <div>
+                            <div style='font-size: 14px; opacity: 0.9; margin-bottom: 5px;'>🕐 DÉBUT</div>
+                            <div style='font-size: 18px; font-weight: bold;' id='heure-debut'>{heure_debut}</div>
+                        </div>
+                        <div>
+                            <div style='font-size: 14px; opacity: 0.9; margin-bottom: 5px;'>⏱️ DURÉE</div>
+                            <div style='font-size: 18px; font-weight: bold;' id='duree-match'>{duree_match}</div>
+                        </div>
+                        <div>
+                            <div style='font-size: 14px; opacity: 0.9; margin-bottom: 5px;'>🕐 FIN PRÉVUE</div>
+                            <div style='font-size: 18px; font-weight: bold;' id='heure-fin'>{heure_fin}</div>
+                        </div>
+                    </div>
+                </div>
 
                 {alliance_html}
                 {maitre_html}
