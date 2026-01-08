@@ -88,7 +88,7 @@ def home():
         selected_status = request.args.get("status", "").strip()
 
         # URL de l'API 1xbet
-        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=100&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        api_url = "https://1xbet.com/service-api/LiveFeed/Get1x2_VZip?sports=85&count=40&lng=fr&gr=285&mode=4&country=96&getEmpty=true&virtualSports=true&noFilterBlockEvent=true"
         response = requests.get(api_url)
         matches = response.json().get("Value", [])
 
@@ -539,7 +539,7 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, 
 def match_details(match_id):
     try:
         # Récupérer les données de l'API 1xbet
-        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=100&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        api_url = "https://1xbet.com/service-api/LiveFeed/Get1x2_VZip?sports=85&count=40&lng=fr&gr=285&mode=4&country=96&getEmpty=true&virtualSports=true&noFilterBlockEvent=true"
         response = requests.get(api_url)
         matches = response.json().get("Value", [])
         match = next((m for m in matches if m.get("I") == match_id), None)

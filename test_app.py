@@ -109,7 +109,7 @@ def test_api_connection():
     """Tester la connexion à l'API 1xbet"""
     print("\n🌐 Test de connexion à l'API...")
     try:
-        api_url = "https://1xbet.com/LiveFeed/Get1x2_VZip?sports=85&count=10&lng=fr&gr=70&mode=4&country=96&getEmpty=true"
+        api_url = "https://1xbet.com/service-api/LiveFeed/Get1x2_VZip?sports=85&count=40&lng=fr&gr=285&mode=4&country=96&getEmpty=true&virtualSports=true&noFilterBlockEvent=true"
         
         print("   - Tentative de connexion à l'API 1xbet...")
         response = requests.get(api_url, timeout=10)
