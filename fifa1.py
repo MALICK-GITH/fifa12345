@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, session, redirect, url_for
 import requests
 import os
 import datetime
@@ -75,10 +75,19 @@ class NumpySimulation:
     def random():
         return random.random()
 
+from models import db, User
+
 # Utilisation de la simulation
 np = NumpySimulation()
 
 app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///oracxpred.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.secret_key = 'oracxpred-metaphore-secret-key-2024'  # Clé secrète pour les sessions
+db.init_app(app)
+
+with app.app_context():
+    db.create_all()
 
 @app.route('/')
 def home():
@@ -275,6 +284,11 @@ def home():
         total_pages = (total + per_page - 1) // per_page
         data_paginated = data[(page-1)*per_page:page*per_page]
 
+        # Récupérer les informations de l'utilisateur connecté
+        current_user = None
+        if session.get('user_id'):
+            current_user = User.query.get(session.get('user_id'))
+        
         return render_template_string(TEMPLATE, data=data_paginated,
             sports=sorted(sports_detected),
             leagues=sorted(leagues_detected),
@@ -282,11 +296,135 @@ def home():
             selected_league=selected_league or "Toutes",
             selected_status=selected_status or "Tous",
             page=page,
-            total_pages=total_pages
+            total_pages=total_pages,
+            current_user=current_user
         )
 
     except Exception as e:
         return f"Erreur : {e}"
+
+# ========== ROUTES ADMIN + UTILISATEURS ==========
+
+def is_admin():
+    return session.get("admin_logged_in") is True
+
+
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+
+        user = User.query.filter_by(username=username).first()
+        if user and user.password == password and user.is_admin:
+            session['admin_logged_in'] = True
+            session['admin_username'] = username
+            user.last_login_at = datetime.datetime.utcnow()
+            db.session.commit()
+            return redirect(url_for('admin_dashboard'))
+
+        return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
+
+    return render_template_string(ADMIN_LOGIN_TEMPLATE)
+
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_logged_in', None)
+    session.pop('admin_username', None)
+    return redirect(url_for('home'))
+
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if not is_admin():
+        return redirect(url_for('admin_login'))
+
+    users = User.query.order_by(User.created_at.desc()).all()
+    return render_template_string(ADMIN_DASHBOARD_TEMPLATE, users=users)
+
+
+@app.route('/admin/user/<int:user_id>/delete', methods=['POST'])
+def admin_delete_user(user_id):
+    if not is_admin():
+        return redirect(url_for('admin_login'))
+
+    user = User.query.get_or_404(user_id)
+    if user.is_admin:
+        return redirect(url_for('admin_dashboard'))
+
+    db.session.delete(user)
+    db.session.commit()
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/<int:user_id>/toggle_admin', methods=['POST'])
+def admin_toggle_admin(user_id):
+    if not is_admin():
+        return redirect(url_for('admin_login'))
+
+    user = User.query.get_or_404(user_id)
+    user.is_admin = not user.is_admin
+    db.session.commit()
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def user_register():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '').strip()
+        confirm_password = request.form.get('confirm_password', '').strip()
+        profile_photo = request.form.get('profile_photo', '').strip()
+
+        if not username or not password:
+            return render_template_string(USER_REGISTER_TEMPLATE, error="Nom d'utilisateur et mot de passe requis")
+
+        if password != confirm_password:
+            return render_template_string(USER_REGISTER_TEMPLATE, error="Les mots de passe ne correspondent pas")
+
+        if User.query.filter_by(username=username).first():
+            return render_template_string(USER_REGISTER_TEMPLATE, error="Nom d'utilisateur déjà pris")
+
+        user = User(
+            username=username,
+            email=email or None,
+            password=password,  # NOTE: en prod, hasher le mot de passe (bcrypt)
+            profile_photo=profile_photo or None,
+            is_admin=False,
+        )
+        db.session.add(user)
+        db.session.commit()
+        return redirect(url_for('user_login'))
+
+    return render_template_string(USER_REGISTER_TEMPLATE)
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def user_login():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '').strip()
+
+        user = User.query.filter_by(username=username).first()
+        if user and user.password == password:
+            session['user_id'] = user.id
+            session['username'] = user.username
+            user.last_login_at = datetime.datetime.utcnow()
+            db.session.commit()
+            return redirect(url_for('home'))
+
+        return render_template_string(USER_LOGIN_TEMPLATE, error="Identifiants incorrects")
+
+    return render_template_string(USER_LOGIN_TEMPLATE)
+
+
+@app.route('/logout')
+def user_logout():
+    session.pop('user_id', None)
+    session.pop('username', None)
+    return redirect(url_for('home'))
 
 def detect_sport(league_name):
     league = league_name.lower()
@@ -2628,6 +2766,1007 @@ def match_details(match_id):
     except Exception as e:
         return f"Erreur lors de l'affichage des détails du match : {e}"
 
+# ========== TEMPLATES ADMIN & UTILISATEURS ==========
+ADMIN_LOGIN_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connexion Admin - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .logo-main {
+            font-size: 72px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            letter-spacing: 4px;
+            margin-bottom: 10px;
+        }
+        .logo-sub {
+            font-size: 36px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.9);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            letter-spacing: 8px;
+        }
+        .admin-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 50px;
+            max-width: 450px;
+            width: 100%;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        .form-group {
+            margin-bottom: 25px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+        .links {
+            text-align: center;
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            margin: 0 10px;
+        }
+        .links a:hover {
+            text-decoration: underline;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="logo-container">
+            <div class="logo-main">ORACXPRED</div>
+            <div class="logo-sub">METAPHORE</div>
+        </div>
+        <div class="admin-container">
+            <h2>🔐 Connexion Admin</h2>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+            <form method="POST">
+                <div class="form-group">
+                    <label for="username">Nom d'utilisateur :</label>
+                    <input type="text" id="username" name="username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password">Mot de passe :</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit" class="btn">Se connecter</button>
+            </form>
+            <div class="links">
+                <a href="/admin/register">Créer un compte</a>
+            </div>
+        </div>
+        <div class="back-link">
+            <a href="/">← Retour à l'accueil</a>
+        </div>
+    </div>
+</body>
+</html>"""
+
+ADMIN_REGISTER_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inscription Admin - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .logo-main {
+            font-size: 72px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            letter-spacing: 4px;
+            margin-bottom: 10px;
+        }
+        .logo-sub {
+            font-size: 36px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.9);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            letter-spacing: 8px;
+        }
+        .admin-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 50px;
+            max-width: 450px;
+            width: 100%;
+        }
+        h2 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        .form-group {
+            margin-bottom: 25px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
+        }
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 14px;
+        }
+        .links {
+            text-align: center;
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 1px solid #e0e0e0;
+        }
+        .links a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            margin: 0 10px;
+        }
+        .links a:hover {
+            text-decoration: underline;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="logo-container">
+            <div class="logo-main">ORACXPRED</div>
+            <div class="logo-sub">METAPHORE</div>
+        </div>
+        <div class="admin-container">
+            <h2>📝 Inscription Admin</h2>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+            <form method="POST">
+                <div class="form-group">
+                    <label for="username">Nom d'utilisateur :</label>
+                    <input type="text" id="username" name="username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password">Mot de passe :</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">Confirmer le mot de passe :</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required>
+                </div>
+                <button type="submit" class="btn">S'inscrire</button>
+            </form>
+            <div class="links">
+                <a href="/admin/login">Déjà un compte ?</a>
+            </div>
+        </div>
+        <div class="back-link">
+            <a href="/">← Retour à l'accueil</a>
+        </div>
+    </div>
+</body>
+</html>"""
+
+ADMIN_DASHBOARD_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Admin Dashboard - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .header {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .header h1 {
+            color: #333;
+            font-size: 36px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .top-links {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .top-links a {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        .top-links a:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        .stats-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 16px;
+            padding: 25px;
+            flex: 1;
+            min-width: 200px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .stat-number {
+            font-size: 42px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+            margin-top: 8px;
+            font-weight: 600;
+        }
+        .table-container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow-x: auto;
+        }
+        table { 
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td { 
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        th { 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        tr:hover {
+            background: #f8f9ff;
+            transition: background 0.2s;
+        }
+        .avatar { 
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid #e0e0e0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .default-avatar {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .badge-admin { 
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+            box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+        }
+        .badge-user { 
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            color: white;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: inline-block;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+        }
+        .actions { 
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .btn { 
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        .btn-danger { 
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(244, 67, 54, 0.3);
+        }
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(244, 67, 54, 0.5);
+        }
+        .btn-toggle { 
+            background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%);
+            color: white;
+            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+        }
+        .btn-toggle:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(33, 150, 243, 0.5);
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 768px) {
+            .header { flex-direction: column; text-align: center; }
+            .header h1 { font-size: 28px; }
+            table { font-size: 14px; }
+            th, td { padding: 12px 8px; }
+            .actions { flex-direction: column; }
+            .btn { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ Panel Administration ORACXPRED</h1>
+        <div class="top-links">
+            <a href="/">← Retour au site</a>
+            <a href="/admin/logout">Déconnexion</a>
+        </div>
+    </div>
+    
+    <div class="stats-bar">
+        <div class="stat-card">
+            <div class="stat-number">{{ users|length }}</div>
+            <div class="stat-label">Total Utilisateurs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ users|selectattr('is_admin')|list|length }}</div>
+            <div class="stat-label">Administrateurs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number">{{ users|rejectattr('is_admin')|list|length }}</div>
+            <div class="stat-label">Utilisateurs</div>
+        </div>
+    </div>
+    
+    <div class="table-container">
+        {% if users %}
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Avatar</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Rôle</th>
+                    <th>Créé le</th>
+                    <th>Dernière connexion</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr>
+                    <td><strong>#{{ u.id }}</strong></td>
+                    <td>
+                        {% if u.profile_photo %}
+                            <img src="{{ u.profile_photo }}" alt="avatar" class="avatar">
+                        {% else %}
+                            <div class="default-avatar">{{ u.username[0].upper() }}</div>
+                        {% endif %}
+                    </td>
+                    <td><strong>{{ u.username }}</strong></td>
+                    <td>{{ u.email or '—' }}</td>
+                    <td>
+                        {% if u.is_admin %}
+                            <span class="badge-admin">👑 Admin</span>
+                        {% else %}
+                            <span class="badge-user">👤 User</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ u.created_at.strftime('%d/%m/%Y') if u.created_at else '—' }}</td>
+                    <td>{{ u.last_login_at.strftime('%d/%m/%Y %H:%M') if u.last_login_at else 'Jamais' }}</td>
+                    <td class="actions">
+                        {% if not u.is_admin %}
+                        <form method="post" action="/admin/user/{{ u.id }}/delete" style="display:inline;">
+                            <button class="btn btn-danger" type="submit" onclick="return confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')">🗑️ Supprimer</button>
+                        </form>
+                        {% endif %}
+                        <form method="post" action="/admin/user/{{ u.id }}/toggle_admin" style="display:inline;">
+                            <button class="btn btn-toggle" type="submit">
+                                {% if u.is_admin %}⬇️ Retirer Admin{% else %}⬆️ Rendre Admin{% endif %}
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">👥</div>
+            <h2>Aucun utilisateur</h2>
+            <p>Il n'y a pas encore d'utilisateurs dans le système.</p>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>"""
+
+USER_REGISTER_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Inscription - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo-main {
+            font-size: 56px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            letter-spacing: 4px;
+            margin-bottom: 8px;
+        }
+        .logo-sub {
+            font-size: 28px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.9);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            letter-spacing: 6px;
+        }
+        .container { 
+            background: white;
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 100%;
+            animation: slideUp 0.5s ease-out;
+        }
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        h2 { 
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+            font-size: 32px;
+            font-weight: 700;
+        }
+        .form-group { 
+            margin-bottom: 20px;
+        }
+        label { 
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input[type="text"], 
+        input[type="password"],
+        input[type="email"] { 
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        input[type="email"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+        .btn { 
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        .error { 
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+        .links { 
+            text-align: center;
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 2px solid #f0f0f0;
+        }
+        .links a { 
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+            transition: all 0.3s;
+        }
+        .links a:hover {
+            text-decoration: underline;
+            color: #764ba2;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 600px) {
+            .logo-main { font-size: 40px; }
+            .logo-sub { font-size: 20px; }
+            .container { padding: 30px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="logo-container">
+            <div class="logo-main">ORACXPRED</div>
+            <div class="logo-sub">METAPHORE</div>
+        </div>
+        <div class="container">
+            <h2>📝 Créer un compte</h2>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+            <form method="POST">
+                <div class="form-group">
+                    <label for="username">👤 Nom d'utilisateur</label>
+                    <input type="text" id="username" name="username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="email">📧 Email (optionnel)</label>
+                    <input type="email" id="email" name="email">
+                </div>
+                <div class="form-group">
+                    <label for="profile_photo">🖼️ URL photo de profil (optionnel)</label>
+                    <input type="text" id="profile_photo" name="profile_photo" placeholder="https://exemple.com/photo.jpg">
+                </div>
+                <div class="form-group">
+                    <label for="password">🔒 Mot de passe</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">🔒 Confirmer le mot de passe</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required>
+                </div>
+                <button type="submit" class="btn">✨ S'inscrire</button>
+            </form>
+            <div class="links">
+                <a href="/login">Déjà un compte ? Se connecter</a>
+            </div>
+        </div>
+        <div class="back-link">
+            <a href="/">← Retour à l'accueil</a>
+        </div>
+    </div>
+</body>
+</html>"""
+
+USER_LOGIN_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connexion - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo-main {
+            font-size: 56px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            letter-spacing: 4px;
+            margin-bottom: 8px;
+        }
+        .logo-sub {
+            font-size: 28px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.9);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            letter-spacing: 6px;
+        }
+        .container { 
+            background: white;
+            padding: 40px;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 100%;
+            animation: slideUp 0.5s ease-out;
+        }
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        h2 { 
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+            font-size: 32px;
+            font-weight: 700;
+        }
+        .form-group { 
+            margin-bottom: 20px;
+        }
+        label { 
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        input[type="text"], 
+        input[type="password"] { 
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+        }
+        .btn { 
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        .error { 
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            padding: 14px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+        .links { 
+            text-align: center;
+            margin-top: 25px;
+            padding-top: 25px;
+            border-top: 2px solid #f0f0f0;
+        }
+        .links a { 
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 15px;
+            transition: all 0.3s;
+        }
+        .links a:hover {
+            text-decoration: underline;
+            color: #764ba2;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 20px;
+        }
+        .back-link a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 600px) {
+            .logo-main { font-size: 40px; }
+            .logo-sub { font-size: 20px; }
+            .container { padding: 30px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <div class="logo-container">
+            <div class="logo-main">ORACXPRED</div>
+            <div class="logo-sub">METAPHORE</div>
+        </div>
+        <div class="container">
+            <h2>🔑 Connexion</h2>
+            {% if error %}
+            <div class="error">{{ error }}</div>
+            {% endif %}
+            <form method="POST">
+                <div class="form-group">
+                    <label for="username">👤 Nom d'utilisateur</label>
+                    <input type="text" id="username" name="username" required autofocus>
+                </div>
+                <div class="form-group">
+                    <label for="password">🔒 Mot de passe</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit" class="btn">✨ Se connecter</button>
+            </form>
+            <div class="links">
+                <a href="/register">Créer un compte</a>
+            </div>
+        </div>
+        <div class="back-link">
+            <a href="/">← Retour à l'accueil</a>
+        </div>
+    </div>
+</body>
+</html>"""
+
 TEMPLATE = """<!DOCTYPE html>
 <html><head>
     <meta charset="utf-8">
@@ -2785,6 +3924,206 @@ TEMPLATE = """<!DOCTYPE html>
         .contact-box { background: #ff1744; border: 4px solid #ff1744; border-radius: 16px; margin: 40px auto 0 auto; padding: 28px; text-align: center; font-size: 22px; font-weight: bold; color: #fff; max-width: 650px; box-shadow: 0 0 24px 8px #ff1744, 0 0 60px 10px #fff3; text-shadow: 0 0 8px #fff, 0 0 16px #ff1744; letter-spacing: 1px; }
         .contact-box a { color: #fff; font-weight: bold; text-decoration: underline; font-size: 26px; text-shadow: 0 0 8px #fff, 0 0 16px #ff1744; }
         .contact-box .icon { font-size: 32px; vertical-align: middle; margin-right: 10px; filter: drop-shadow(0 0 6px #fff); }
+        
+        /* Logo ORACXPRED + METAPHORE */
+        .main-logo-container {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: -20px -20px 30px -20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .main-logo-main {
+            font-size: 64px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            letter-spacing: 6px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        .main-logo-sub {
+            font-size: 32px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.95);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            letter-spacing: 10px;
+            text-transform: uppercase;
+        }
+        
+        /* Section Profil Utilisateur */
+        .user-profile-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(102, 126, 234, 0.3);
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 25px;
+            animation: slideInDown 0.6s ease-out;
+        }
+        @keyframes slideInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        .user-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            border: 4px solid rgba(255,255,255,0.3);
+            object-fit: cover;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+        }
+        .user-avatar:hover {
+            transform: scale(1.1);
+        }
+        .user-info {
+            flex: 1;
+        }
+        .user-name {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .user-details {
+            font-size: 16px;
+            opacity: 0.95;
+            margin-top: 5px;
+        }
+        .user-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .user-btn {
+            padding: 12px 24px;
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(10px);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 15px;
+            transition: all 0.3s;
+            border: 2px solid rgba(255,255,255,0.3);
+        }
+        .user-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+        }
+        .default-avatar {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            border: 4px solid rgba(255,255,255,0.3);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+        }
+        
+        /* Section Admin */
+        .admin-section {
+            background: white;
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .admin-section h3 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 26px;
+            font-weight: 700;
+        }
+        .admin-links {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .admin-btn {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 16px;
+            transition: all 0.3s;
+            display: inline-block;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        .admin-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        .admin-status {
+            margin-top: 15px;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+            display: inline-block;
+            box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        }
+        .admin-status.logged-out {
+            background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+            box-shadow: 0 4px 15px rgba(255, 152, 0, 0.3);
+        }
+        
+        @media (max-width: 800px) {
+            .main-logo-main {
+                font-size: 42px;
+                letter-spacing: 3px;
+            }
+            .main-logo-sub {
+                font-size: 22px;
+                letter-spacing: 5px;
+            }
+            .user-profile-section {
+                flex-direction: column;
+                text-align: center;
+                padding: 25px;
+            }
+            .user-info {
+                text-align: center;
+            }
+            .user-actions {
+                justify-content: center;
+                width: 100%;
+            }
+            .user-btn {
+                flex: 1;
+                min-width: 120px;
+            }
+            .admin-links {
+                flex-direction: column;
+            }
+            .admin-btn {
+                width: 100%;
+            }
+        }
     </style>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -2798,6 +4137,71 @@ TEMPLATE = """<!DOCTYPE html>
     </script>
 </head><body>
     <div id="loader" role="status" aria-live="polite"><div class="spinner" aria-label="Chargement"></div></div>
+    
+    <!-- Logo ORACXPRED + METAPHORE -->
+    <div class="main-logo-container">
+        <div class="main-logo-main">ORACXPRED</div>
+        <div class="main-logo-sub">METAPHORE</div>
+    </div>
+    
+    <!-- Section Profil Utilisateur -->
+    {% if current_user %}
+    <div class="user-profile-section">
+        <div>
+            {% if current_user.profile_photo %}
+                <img src="{{ current_user.profile_photo }}" alt="Avatar" class="user-avatar">
+            {% else %}
+                <div class="default-avatar">👤</div>
+            {% endif %}
+        </div>
+        <div class="user-info">
+            <div class="user-name">{{ current_user.username }}</div>
+            <div class="user-details">
+                {% if current_user.email %}📧 {{ current_user.email }}{% endif %}
+                {% if current_user.is_admin %} | 👑 Administrateur{% endif %}
+            </div>
+            <div class="user-details" style="font-size: 14px; margin-top: 8px; opacity: 0.8;">
+                Membre depuis {{ current_user.created_at.strftime('%d/%m/%Y') if current_user.created_at else 'Récemment' }}
+            </div>
+        </div>
+        <div class="user-actions">
+            <a href="/logout" class="user-btn">Déconnexion</a>
+        </div>
+    </div>
+    {% else %}
+    <div class="user-profile-section" style="justify-content: center;">
+        <div class="user-info" style="text-align: center;">
+            <div class="user-name">Bienvenue sur ORACXPRED</div>
+            <div class="user-details">Connectez-vous pour accéder à votre profil</div>
+        </div>
+        <div class="user-actions">
+            <a href="/login" class="user-btn">Connexion</a>
+            <a href="/register" class="user-btn">Inscription</a>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Section Admin -->
+    <div class="admin-section">
+        <h3>🔐 Administration</h3>
+        {% if session.get('admin_logged_in') %}
+        <div class="admin-status">
+            ✅ Connecté en tant que : <strong>{{ session.get('admin_username', 'Admin') }}</strong>
+        </div>
+        <div class="admin-links">
+            <a href="/admin/dashboard" class="admin-btn">📊 Dashboard Admin</a>
+            <a href="/admin/logout" class="admin-btn">Déconnexion</a>
+        </div>
+        {% else %}
+        <div class="admin-status logged-out">
+            ⚠️ Non connecté en tant qu'admin
+        </div>
+        <div class="admin-links">
+            <a href="/admin/login" class="admin-btn">Connexion Admin</a>
+        </div>
+        {% endif %}
+    </div>
+    
     <h2>📊 Matchs en direct — {{ selected_sport }} / {{ selected_league }} / {{ selected_status }}</h2>
 
     <form method="get" aria-label="Filtres de matchs">
