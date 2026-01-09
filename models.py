@@ -50,7 +50,7 @@ class SystemLog(db.Model):
     admin_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     message = db.Column(db.Text, nullable=False)
     severity = db.Column(db.String(20), default='info')  # info, warning, error, critical
-    metadata = db.Column(db.Text, nullable=True)  # JSON pour données supplémentaires
+    extra_data = db.Column(db.Text, nullable=True)  # JSON pour données supplémentaires (renommé de metadata car réservé SQLAlchemy)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self) -> str:

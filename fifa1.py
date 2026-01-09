@@ -100,7 +100,7 @@ def log_action(action_type, message, user_id=None, admin_id=None, severity='info
             admin_id=admin_id,
             message=message,
             severity=severity,
-            metadata=json.dumps(metadata) if metadata else None
+            extra_data=json.dumps(metadata) if metadata else None
         )
         db.session.add(log_entry)
         db.session.commit()
