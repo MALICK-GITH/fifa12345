@@ -75,7 +75,7 @@ class NumpySimulation:
     def random():
         return random.random()
 
-from models import db, User
+from models import db, User, SystemLog
 
 # Utilisation de la simulation
 np = NumpySimulation()
@@ -88,6 +88,55 @@ db.init_app(app)
 
 with app.app_context():
     db.create_all()
+
+# ========== FONCTIONS UTILITAIRES ==========
+
+def log_action(action_type, message, user_id=None, admin_id=None, severity='info', metadata=None):
+    """Journalise une action dans le système"""
+    try:
+        log_entry = SystemLog(
+            action_type=action_type,
+            user_id=user_id,
+            admin_id=admin_id,
+            message=message,
+            severity=severity,
+            metadata=json.dumps(metadata) if metadata else None
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+    except Exception as e:
+        print(f"❌ Erreur lors de la journalisation: {e}")
+
+def get_current_user():
+    """Récupère l'utilisateur actuellement connecté"""
+    if session.get('user_id'):
+        return User.query.get(session.get('user_id'))
+    return None
+
+def require_login(f):
+    """Décorateur pour exiger une connexion"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = get_current_user()
+        if not user or not user.is_approved:
+            return redirect(url_for('user_login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def require_paid_access(f):
+    """Décorateur pour exiger un accès payant"""
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return redirect(url_for('user_login'))
+        if not user.can_view_predictions():
+            session['error_message'] = "Accès réservé — Un abonnement actif est requis pour voir les prédictions"
+            return redirect(url_for('subscription_plans'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/')
 def home():
@@ -285,9 +334,24 @@ def home():
         data_paginated = data[(page-1)*per_page:page*per_page]
 
         # Récupérer les informations de l'utilisateur connecté
-        current_user = None
-        if session.get('user_id'):
-            current_user = User.query.get(session.get('user_id'))
+        current_user = get_current_user()
+        can_view_predictions = False
+        
+        if current_user:
+            can_view_predictions = current_user.can_view_predictions()
+        else:
+            # Visiteur non connecté - masquer toutes les prédictions
+            can_view_predictions = False
+            # Remplacer les prédictions par un message
+            for match_data in data_paginated:
+                match_data['prediction'] = "🔒 Accès réservé — Connectez-vous pour voir les prédictions"
+                match_data['odds'] = ["🔒 Réservé"]  # Masquer aussi les cotes
+        
+        # Si l'utilisateur est connecté mais n'a pas d'accès payant
+        if current_user and not can_view_predictions:
+            for match_data in data_paginated:
+                match_data['prediction'] = "🔒 Accès réservé — Un abonnement actif est requis"
+                match_data['odds'] = ["🔒 Réservé"]
         
         return render_template_string(TEMPLATE, data=data_paginated,
             sports=sorted(sports_detected),
@@ -297,7 +361,8 @@ def home():
             selected_status=selected_status or "Tous",
             page=page,
             total_pages=total_pages,
-            current_user=current_user
+            current_user=current_user,
+            can_view_predictions=can_view_predictions
         )
 
     except Exception as e:
@@ -319,10 +384,13 @@ def admin_login():
         if user and user.password == password and user.is_admin:
             session['admin_logged_in'] = True
             session['admin_username'] = username
+            session['admin_id'] = user.id
             user.last_login_at = datetime.datetime.utcnow()
             db.session.commit()
+            log_action('admin_login', f"Connexion admin: {username}", admin_id=user.id, severity='info')
             return redirect(url_for('admin_dashboard'))
 
+        log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
         return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
 
     return render_template_string(ADMIN_LOGIN_TEMPLATE)
@@ -350,11 +418,15 @@ def admin_delete_user(user_id):
         return redirect(url_for('admin_login'))
 
     user = User.query.get_or_404(user_id)
+    admin_user = User.query.get(session.get('admin_id'))
     if user.is_admin:
         return redirect(url_for('admin_dashboard'))
 
+    username = user.username
     db.session.delete(user)
     db.session.commit()
+    log_action('admin_action', f"Utilisateur supprimé: {username}", 
+               admin_id=admin_user.id if admin_user else None, user_id=user_id, severity='warning')
     return redirect(url_for('admin_dashboard'))
 
 
@@ -364,8 +436,52 @@ def admin_toggle_admin(user_id):
         return redirect(url_for('admin_login'))
 
     user = User.query.get_or_404(user_id)
+    admin_user = User.query.get(session.get('admin_id'))
+    old_status = user.is_admin
     user.is_admin = not user.is_admin
     db.session.commit()
+    log_action('admin_action', f"Changement statut admin pour {user.username}: {'Promu admin' if user.is_admin else 'Rétrogradé'}", 
+               admin_id=admin_user.id if admin_user else None, user_id=user_id, severity='warning')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/<int:user_id>/approve', methods=['POST'])
+def admin_approve_user(user_id):
+    """Approuver un utilisateur"""
+    if not is_admin():
+        return redirect(url_for('admin_login'))
+    
+    user = User.query.get_or_404(user_id)
+    admin_user = User.query.get(session.get('admin_id'))
+    user.is_approved = True
+    db.session.commit()
+    log_action('admin_action', f"Utilisateur approuvé: {user.username}", 
+               admin_id=admin_user.id if admin_user else None, user_id=user_id, severity='info')
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/user/<int:user_id>/set_plan', methods=['POST'])
+def admin_set_plan(user_id):
+    """Définir le plan d'abonnement d'un utilisateur"""
+    if not is_admin():
+        return redirect(url_for('admin_login'))
+    
+    user = User.query.get_or_404(user_id)
+    admin_user = User.query.get(session.get('admin_id'))
+    plan = request.form.get('plan', 'free')
+    status = request.form.get('status', 'inactive')
+    
+    if plan in ['free', 'premium', 'vip']:
+        user.subscription_plan = plan
+        user.subscription_status = status
+        if status == 'active':
+            # Ajouter 30 jours par défaut
+            from datetime import timedelta
+            user.subscription_expires_at = datetime.datetime.utcnow() + timedelta(days=30)
+        db.session.commit()
+        log_action('admin_action', f"Plan modifié pour {user.username}: {plan} ({status})", 
+                   admin_id=admin_user.id if admin_user else None, user_id=user_id, severity='info')
+    
     return redirect(url_for('admin_dashboard'))
 
 
@@ -409,12 +525,17 @@ def user_login():
 
         user = User.query.filter_by(username=username).first()
         if user and user.password == password:
+            if not user.is_approved:
+                return render_template_string(USER_LOGIN_TEMPLATE, error="Votre compte n'est pas encore approuvé par un administrateur. Veuillez patienter.")
+            
             session['user_id'] = user.id
             session['username'] = user.username
             user.last_login_at = datetime.datetime.utcnow()
             db.session.commit()
+            log_action('user_login', f"Connexion utilisateur: {username}", user_id=user.id, severity='info')
             return redirect(url_for('home'))
 
+        log_action('user_login_failed', f"Tentative de connexion échouée: {username}", severity='warning')
         return render_template_string(USER_LOGIN_TEMPLATE, error="Identifiants incorrects")
 
     return render_template_string(USER_LOGIN_TEMPLATE)
@@ -422,9 +543,42 @@ def user_login():
 
 @app.route('/logout')
 def user_logout():
+    user = get_current_user()
+    if user:
+        log_action('user_logout', f"Déconnexion utilisateur: {user.username}", user_id=user.id, severity='info')
     session.pop('user_id', None)
     session.pop('username', None)
     return redirect(url_for('home'))
+
+@app.route('/subscription')
+def subscription_plans():
+    """Page des plans d'abonnement"""
+    current_user = get_current_user()
+    error_message = session.pop('error_message', None)
+    
+    return render_template_string(SUBSCRIPTION_PLANS_TEMPLATE, 
+        current_user=current_user,
+        error_message=error_message
+    )
+
+@app.route('/admin/oracx-admin')
+def oracx_admin():
+    """Interface admin séparée ORACX-ADMIN"""
+    if not is_admin():
+        return redirect(url_for('admin_login'))
+    
+    # Récupérer les statistiques
+    total_users = User.query.count()
+    active_subscriptions = User.query.filter_by(subscription_status='active').count()
+    pending_approvals = User.query.filter_by(is_approved=False).count()
+    recent_logs = SystemLog.query.order_by(SystemLog.created_at.desc()).limit(50).all()
+    
+    return render_template_string(ORACX_ADMIN_TEMPLATE,
+        total_users=total_users,
+        active_subscriptions=active_subscriptions,
+        pending_approvals=pending_approvals,
+        recent_logs=recent_logs
+    )
 
 def detect_sport(league_name):
     league = league_name.lower()
@@ -674,6 +828,7 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, 
     return f"Pari G{groupe}-T{type_pari}" + (f"-P{param}" if param is not None else "")
 
 @app.route('/match/<int:match_id>')
+@require_paid_access
 def match_details(match_id):
     try:
         # Récupérer les données de l'API 1xbet
@@ -3333,6 +3488,7 @@ ADMIN_DASHBOARD_TEMPLATE = """<!DOCTYPE html>
                     <th>Username</th>
                     <th>Email</th>
                     <th>Rôle</th>
+                    <th>Plan</th>
                     <th>Créé le</th>
                     <th>Dernière connexion</th>
                     <th>Actions</th>
@@ -3350,28 +3506,56 @@ ADMIN_DASHBOARD_TEMPLATE = """<!DOCTYPE html>
                         {% endif %}
                     </td>
                     <td><strong>{{ u.username }}</strong></td>
-                    <td>{{ u.email or '—' }}</td>
-                    <td>
-                        {% if u.is_admin %}
-                            <span class="badge-admin">👑 Admin</span>
-                        {% else %}
-                            <span class="badge-user">👤 User</span>
-                        {% endif %}
-                    </td>
-                    <td>{{ u.created_at.strftime('%d/%m/%Y') if u.created_at else '—' }}</td>
-                    <td>{{ u.last_login_at.strftime('%d/%m/%Y %H:%M') if u.last_login_at else 'Jamais' }}</td>
-                    <td class="actions">
-                        {% if not u.is_admin %}
-                        <form method="post" action="/admin/user/{{ u.id }}/delete" style="display:inline;">
-                            <button class="btn btn-danger" type="submit" onclick="return confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')">🗑️ Supprimer</button>
-                        </form>
-                        {% endif %}
-                        <form method="post" action="/admin/user/{{ u.id }}/toggle_admin" style="display:inline;">
-                            <button class="btn btn-toggle" type="submit">
-                                {% if u.is_admin %}⬇️ Retirer Admin{% else %}⬆️ Rendre Admin{% endif %}
-                            </button>
-                        </form>
-                    </td>
+                <td>{{ u.email or '—' }}</td>
+                <td>
+                    {% if u.is_admin %}
+                        <span class="badge-admin">👑 Admin</span>
+                    {% else %}
+                        <span class="badge-user">👤 User</span>
+                    {% endif %}
+                    {% if not u.is_approved %}
+                        <br><span style="background:#ff9800; color:white; padding:3px 8px; border-radius:6px; font-size:11px; margin-top:5px; display:inline-block;">En attente</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <strong style="text-transform:uppercase;">{{ u.subscription_plan }}</strong>
+                    <br><small style="color:#666;">{{ u.subscription_status }}</small>
+                    {% if u.subscription_expires_at %}
+                        <br><small style="color:#999; font-size:11px;">Exp: {{ u.subscription_expires_at.strftime('%d/%m/%Y') if u.subscription_expires_at else '—' }}</small>
+                    {% endif %}
+                </td>
+                <td>{{ u.created_at.strftime('%d/%m/%Y') if u.created_at else '—' }}</td>
+                <td>{{ u.last_login_at.strftime('%d/%m/%Y %H:%M') if u.last_login_at else 'Jamais' }}</td>
+                <td class="actions">
+                    {% if not u.is_approved %}
+                    <form method="post" action="/admin/user/{{ u.id }}/approve" style="display:inline;">
+                        <button class="btn" type="submit" style="background:#4caf50;">✅ Approuver</button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="/admin/user/{{ u.id }}/set_plan" style="display:inline;">
+                        <select name="plan" style="padding:6px; border-radius:6px; margin-right:5px;">
+                            <option value="free" {% if u.subscription_plan=='free' %}selected{% endif %}>Free</option>
+                            <option value="premium" {% if u.subscription_plan=='premium' %}selected{% endif %}>Premium</option>
+                            <option value="vip" {% if u.subscription_plan=='vip' %}selected{% endif %}>VIP</option>
+                        </select>
+                        <select name="status" style="padding:6px; border-radius:6px; margin-right:5px;">
+                            <option value="inactive" {% if u.subscription_status=='inactive' %}selected{% endif %}>Inactif</option>
+                            <option value="active" {% if u.subscription_status=='active' %}selected{% endif %}>Actif</option>
+                            <option value="expired" {% if u.subscription_status=='expired' %}selected{% endif %}>Expiré</option>
+                        </select>
+                        <button class="btn btn-toggle" type="submit">💳 Modifier Plan</button>
+                    </form>
+                    {% if not u.is_admin %}
+                    <form method="post" action="/admin/user/{{ u.id }}/delete" style="display:inline;">
+                        <button class="btn btn-danger" type="submit" onclick="return confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')">🗑️ Supprimer</button>
+                    </form>
+                    {% endif %}
+                    <form method="post" action="/admin/user/{{ u.id }}/toggle_admin" style="display:inline;">
+                        <button class="btn btn-toggle" type="submit">
+                            {% if u.is_admin %}⬇️ Retirer Admin{% else %}⬆️ Rendre Admin{% endif %}
+                        </button>
+                    </form>
+                </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -3763,6 +3947,393 @@ USER_LOGIN_TEMPLATE = """<!DOCTYPE html>
         <div class="back-link">
             <a href="/">← Retour à l'accueil</a>
         </div>
+    </div>
+</body>
+</html>"""
+
+SUBSCRIPTION_PLANS_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Plans d'Abonnement - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .logo-container {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .logo-main {
+            font-size: 56px;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            letter-spacing: 4px;
+            margin-bottom: 8px;
+        }
+        .logo-sub {
+            font-size: 28px;
+            font-weight: 300;
+            color: rgba(255,255,255,0.9);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            letter-spacing: 6px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .error-box {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            text-align: center;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.3);
+        }
+        .plans-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        .plan-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            text-align: center;
+            transition: transform 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .plan-card:hover {
+            transform: translateY(-10px);
+        }
+        .plan-card.featured {
+            border: 4px solid #667eea;
+            transform: scale(1.05);
+        }
+        .plan-badge {
+            position: absolute;
+            top: 20px;
+            right: -30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 40px;
+            transform: rotate(45deg);
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .plan-name {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .plan-price {
+            font-size: 48px;
+            font-weight: 900;
+            color: #333;
+            margin: 20px 0;
+        }
+        .plan-price .currency {
+            font-size: 24px;
+            vertical-align: top;
+        }
+        .plan-features {
+            list-style: none;
+            margin: 30px 0;
+            text-align: left;
+        }
+        .plan-features li {
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 16px;
+        }
+        .plan-features li:before {
+            content: "✓ ";
+            color: #4caf50;
+            font-weight: 700;
+            margin-right: 10px;
+        }
+        .plan-btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 18px;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        .plan-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        .plan-btn.secondary {
+            background: #e0e0e0;
+            color: #666;
+        }
+        .back-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+        .back-link a {
+            color: rgba(255,255,255,0.9);
+            text-decoration: none;
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .back-link a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 768px) {
+            .logo-main { font-size: 40px; }
+            .logo-sub { font-size: 20px; }
+            .plans-grid { grid-template-columns: 1fr; }
+            .plan-card.featured { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <div class="logo-container">
+        <div class="logo-main">ORACXPRED</div>
+        <div class="logo-sub">METAPHORE</div>
+    </div>
+    <div class="container">
+        {% if error_message %}
+        <div class="error-box">{{ error_message }}</div>
+        {% endif %}
+        
+        <div class="plans-grid">
+            <div class="plan-card">
+                <div class="plan-name">🆓 Gratuit</div>
+                <div class="plan-price"><span class="currency">0€</span>/mois</div>
+                <ul class="plan-features">
+                    <li>Accès de base</li>
+                    <li>Matchs en direct</li>
+                    <li>Fonctionnalités limitées</li>
+                    <li>Aucune prédiction</li>
+                </ul>
+                <button class="plan-btn secondary" disabled>Plan actuel</button>
+            </div>
+            
+            <div class="plan-card featured">
+                <div class="plan-badge">POPULAIRE</div>
+                <div class="plan-name">💎 Premium</div>
+                <div class="plan-price"><span class="currency">29€</span>/mois</div>
+                <ul class="plan-features">
+                    <li>Toutes les prédictions avancées</li>
+                    <li>Consensus et confiance</li>
+                    <li>Cotes exploitables</li>
+                    <li>Historique personnel</li>
+                    <li>Graphiques complets</li>
+                    <li>Favoris illimités</li>
+                </ul>
+                {% if current_user %}
+                    <a href="/admin/oracx-admin?action=upgrade&plan=premium" class="plan-btn" style="display:block; text-decoration:none; color:white;">
+                        Contactez l'admin pour activer
+                    </a>
+                {% else %}
+                    <a href="/register" class="plan-btn" style="display:block; text-decoration:none; color:white;">
+                        S'inscrire
+                    </a>
+                {% endif %}
+            </div>
+            
+            <div class="plan-card">
+                <div class="plan-name">👑 VIP</div>
+                <div class="plan-price"><span class="currency">79€</span>/mois</div>
+                <ul class="plan-features">
+                    <li>Toutes les fonctionnalités Premium</li>
+                    <li>Support prioritaire</li>
+                    <li>Accès API exclusif</li>
+                    <li>Analytics avancés</li>
+                    <li>Alertes en temps réel</li>
+                    <li>Conseils personnalisés</li>
+                </ul>
+                {% if current_user %}
+                    <a href="/admin/oracx-admin?action=upgrade&plan=vip" class="plan-btn" style="display:block; text-decoration:none; color:white;">
+                        Contactez l'admin pour activer
+                    </a>
+                {% else %}
+                    <a href="/register" class="plan-btn" style="display:block; text-decoration:none; color:white;">
+                        S'inscrire
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="back-link">
+            <a href="/">← Retour à l'accueil</a>
+        </div>
+    </div>
+</body>
+</html>"""
+
+ORACX_ADMIN_TEMPLATE = """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ORACX-ADMIN - Interface d'Administration</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #fff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        .header h1 {
+            font-size: 42px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        .header p {
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #16213e;
+            border-radius: 16px;
+            padding: 25px;
+            border: 2px solid #0f3460;
+            transition: all 0.3s;
+        }
+        .stat-card:hover {
+            border-color: #667eea;
+            transform: translateY(-5px);
+        }
+        .stat-value {
+            font-size: 48px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.8;
+            margin-top: 10px;
+        }
+        .logs-section {
+            background: #16213e;
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 2px solid #0f3460;
+        }
+        .logs-section h2 {
+            margin-bottom: 20px;
+            font-size: 28px;
+        }
+        .log-entry {
+            background: #0f3460;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+            font-size: 14px;
+        }
+        .log-entry.error { border-left-color: #f44336; }
+        .log-entry.warning { border-left-color: #ff9800; }
+        .log-entry.info { border-left-color: #2196f3; }
+        .log-time {
+            opacity: 0.6;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .actions {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .action-btn {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: 600;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        .action-btn.secondary {
+            background: #424242;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ ORACX-ADMIN</h1>
+        <p>Interface d'administration sécurisée pour ORACXPRED Métaphore</p>
+    </div>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ total_users }}</div>
+            <div class="stat-label">Total Utilisateurs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ active_subscriptions }}</div>
+            <div class="stat-label">Abonnements Actifs</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ pending_approvals }}</div>
+            <div class="stat-label">En Attente d'Approbation</div>
+        </div>
+    </div>
+    
+    <div class="actions">
+        <a href="/admin/dashboard" class="action-btn">📊 Dashboard Complet</a>
+        <a href="/" class="action-btn secondary">← Retour au site</a>
+        <a href="/admin/logout" class="action-btn secondary">Déconnexion</a>
+    </div>
+    
+    <div class="logs-section">
+        <h2>📋 Logs Système Récents</h2>
+        {% if recent_logs %}
+            {% for log in recent_logs %}
+            <div class="log-entry {{ log.severity }}">
+                <div class="log-time">{{ log.created_at.strftime('%d/%m/%Y %H:%M:%S') if log.created_at else 'Récent' }}</div>
+                <div><strong>[{{ log.action_type.upper() }}]</strong> {{ log.message }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="log-entry info">Aucun log pour le moment</div>
+        {% endif %}
     </div>
 </body>
 </html>"""
