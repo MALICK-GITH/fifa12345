@@ -75,7 +75,12 @@ class NumpySimulation:
     def random():
         return random.random()
 
-from models import db, User, SystemLog
+from models import db, User, SystemLog, Prediction, Alert, AccessLog
+from prediction_manager import (
+    log_action, log_access, create_prediction, get_prediction_by_match,
+    invalidate_prediction, lock_prediction, create_alert, check_match_started_alert,
+    check_odds_change_alert
+)
 
 # Utilisation de la simulation
 np = NumpySimulation()
@@ -90,22 +95,6 @@ with app.app_context():
     db.create_all()
 
 # ========== FONCTIONS UTILITAIRES ==========
-
-def log_action(action_type, message, user_id=None, admin_id=None, severity='info', metadata=None):
-    """Journalise une action dans le système"""
-    try:
-        log_entry = SystemLog(
-            action_type=action_type,
-            user_id=user_id,
-            admin_id=admin_id,
-            message=message,
-            severity=severity,
-            extra_data=json.dumps(metadata) if metadata else None
-        )
-        db.session.add(log_entry)
-        db.session.commit()
-    except Exception as e:
-        print(f"❌ Erreur lors de la journalisation: {e}")
 
 def get_current_user():
     """Récupère l'utilisateur actuellement connecté"""
