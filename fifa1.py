@@ -75,12 +75,21 @@ class NumpySimulation:
     def random():
         return random.random()
 
-from models import db, User, SystemLog, Prediction, Alert, AccessLog
+from models import (
+    db, User, SystemLog, Prediction, Alert, AccessLog,
+    SubscriptionPlan, UserSubscription, UserPredictionAccess, Notification,
+    PersistentSession, BackupLog, PredictionSchedule
+)
 from prediction_manager import (
     log_action, log_access, create_prediction, get_prediction_by_match,
     invalidate_prediction, lock_prediction, create_alert, check_match_started_alert,
     check_odds_change_alert
 )
+from oracxpred_utils import (
+    get_user_from_session_token, ensure_user_unique_id, check_and_expire_subscriptions,
+    cleanup_expired_sessions
+)
+import uuid
 
 # Utilisation de la simulation
 np = NumpySimulation()
@@ -93,6 +102,45 @@ db.init_app(app)
 
 with app.app_context():
     db.create_all()
+    # Initialiser les unique_id pour les utilisateurs existants
+    from oracxpred_utils import initialize_user_unique_ids
+    initialize_user_unique_ids()
+    
+    # Créer les plans par défaut s'ils n'existent pas
+    if SubscriptionPlan.query.count() == 0:
+        default_plans = [
+            {'name': 'Plan 1 Semaine', 'predictions_per_day': 3, 'duration_days': 7, 
+             'duration_type': 'week', 'price_fcfa': 5000, 'description': '3 prédictions/jour - 1 semaine'},
+            {'name': 'Plan 1 Mois', 'predictions_per_day': 3, 'duration_days': 30,
+             'duration_type': 'month', 'price_fcfa': 9500, 'description': '3 prédictions/jour - 1 mois'},
+            {'name': 'Plan Longue Durée', 'predictions_per_day': 3, 'duration_days': 90,
+             'duration_type': 'long', 'price_fcfa': 18000, 'description': '3 prédictions/jour - durée longue'},
+        ]
+        admin_user = User.query.filter_by(is_admin=True).first()
+        admin_id = admin_user.id if admin_user else 1
+        
+        for plan_data in default_plans:
+            plan = SubscriptionPlan(
+                name=plan_data['name'],
+                description=plan_data['description'],
+                predictions_per_day=plan_data['predictions_per_day'],
+                duration_days=plan_data['duration_days'],
+                duration_type=plan_data['duration_type'],
+                price_fcfa=plan_data['price_fcfa'],
+                is_active=True,
+                created_by=admin_id
+            )
+            db.session.add(plan)
+        db.session.commit()
+
+# Enregistrer les blueprints
+try:
+    from admin_routes import admin_bp
+    from user_routes import user_bp
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(user_bp)
+except ImportError as e:
+    print(f"⚠️ Impossible de charger les blueprints: {e}")
 
 # ========== FONCTIONS UTILITAIRES ==========
 
@@ -474,70 +522,27 @@ def admin_set_plan(user_id):
     return redirect(url_for('admin_dashboard'))
 
 
+# Route d'inscription gérée par user_bp
+# Conservée pour compatibilité mais redirige vers le blueprint
 @app.route('/register', methods=['GET', 'POST'])
 def user_register():
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        email = request.form.get('email', '').strip()
-        password = request.form.get('password', '').strip()
-        confirm_password = request.form.get('confirm_password', '').strip()
-        profile_photo = request.form.get('profile_photo', '').strip()
-
-        if not username or not password:
-            return render_template_string(USER_REGISTER_TEMPLATE, error="Nom d'utilisateur et mot de passe requis")
-
-        if password != confirm_password:
-            return render_template_string(USER_REGISTER_TEMPLATE, error="Les mots de passe ne correspondent pas")
-
-        if User.query.filter_by(username=username).first():
-            return render_template_string(USER_REGISTER_TEMPLATE, error="Nom d'utilisateur déjà pris")
-
-        user = User(
-            username=username,
-            email=email or None,
-            password=password,  # NOTE: en prod, hasher le mot de passe (bcrypt)
-            profile_photo=profile_photo or None,
-            is_admin=False,
-        )
-        db.session.add(user)
-        db.session.commit()
-        return redirect(url_for('user_login'))
-
-    return render_template_string(USER_REGISTER_TEMPLATE)
+    from user_routes import user_bp
+    # Rediriger vers le blueprint
+    return user_bp.view_functions['user_register']()
 
 
+# Route de connexion gérée par user_bp
 @app.route('/login', methods=['GET', 'POST'])
 def user_login():
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
-
-        user = User.query.filter_by(username=username).first()
-        if user and user.password == password:
-            if not user.is_approved:
-                return render_template_string(USER_LOGIN_TEMPLATE, error="Votre compte n'est pas encore approuvé par un administrateur. Veuillez patienter.")
-            
-            session['user_id'] = user.id
-            session['username'] = user.username
-            user.last_login_at = datetime.datetime.utcnow()
-            db.session.commit()
-            log_action('user_login', f"Connexion utilisateur: {username}", user_id=user.id, severity='info')
-            return redirect(url_for('home'))
-
-        log_action('user_login_failed', f"Tentative de connexion échouée: {username}", severity='warning')
-        return render_template_string(USER_LOGIN_TEMPLATE, error="Identifiants incorrects")
-
-    return render_template_string(USER_LOGIN_TEMPLATE)
+    from user_routes import user_bp
+    return user_bp.view_functions['user_login']()
 
 
+# Route de déconnexion gérée par user_bp
 @app.route('/logout')
 def user_logout():
-    user = get_current_user()
-    if user:
-        log_action('user_logout', f"Déconnexion utilisateur: {user.username}", user_id=user.id, severity='info')
-    session.pop('user_id', None)
-    session.pop('username', None)
-    return redirect(url_for('home'))
+    from user_routes import user_bp
+    return user_bp.view_functions['user_logout']()
 
 @app.route('/subscription')
 def subscription_plans():
@@ -819,6 +824,56 @@ def traduire_pari_type_groupe(type_pari, groupe, param, team1=None, team2=None, 
 @app.route('/match/<int:match_id>')
 @require_paid_access
 def match_details(match_id):
+    # Vérifier les limitations d'accès aux prédictions
+    user = get_current_user()
+    if user and not user.is_admin:
+        # Vérifier si l'utilisateur peut encore voir des prédictions aujourd'hui
+        if not user.can_view_more_predictions_today():
+            plan_limits = user.get_plan_limits()
+            viewed_today = user.get_predictions_viewed_today()
+            if plan_limits:
+                return render_template_string("""
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Limite atteinte - ORACXPRED</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+                            .error { background: #ff6b6b; color: white; padding: 20px; border-radius: 10px; max-width: 500px; margin: 0 auto; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="error">
+                            <h2>⚠️ Limite quotidienne atteinte</h2>
+                            <p>Vous avez consulté <strong>{{ viewed_today }}/{{ plan_limits.predictions_per_day }}</strong> prédictions aujourd'hui.</p>
+                            <p>Votre limite sera réinitialisée demain.</p>
+                            <a href="/" style="color: white; text-decoration: underline;">Retour à l'accueil</a>
+                        </div>
+                    </body>
+                    </html>
+                """, viewed_today=viewed_today, plan_limits=plan_limits)
+        
+        # Enregistrer l'accès à cette prédiction
+        prediction = Prediction.query.filter_by(match_id=match_id).first()
+        if prediction:
+            # Vérifier si l'accès n'a pas déjà été enregistré aujourd'hui
+            today = datetime.datetime.utcnow().date()
+            existing_access = UserPredictionAccess.query.filter_by(
+                user_id=user.id,
+                prediction_id=prediction.id,
+                access_date=today
+            ).first()
+            
+            if not existing_access:
+                access = UserPredictionAccess(
+                    user_id=user.id,
+                    prediction_id=prediction.id,
+                    access_date=today
+                )
+                db.session.add(access)
+                db.session.commit()
+    
+    # Continuer avec le code existant
     try:
         # Récupérer les données de l'API 1xbet
         api_url = "https://1xbet.com/service-api/LiveFeed/Get1x2_VZip?sports=85&count=40&lng=fr&gr=285&mode=4&country=96&getEmpty=true&virtualSports=true&noFilterBlockEvent=true"
@@ -3723,7 +3778,7 @@ USER_REGISTER_TEMPLATE = """<!DOCTYPE html>
             {% if error %}
             <div class="error">{{ error }}</div>
             {% endif %}
-            <form method="POST">
+            <form method="POST" enctype="multipart/form-data">
                 <div class="form-group">
                     <label for="username">👤 Nom d'utilisateur</label>
                     <input type="text" id="username" name="username" required autofocus>
@@ -3733,8 +3788,11 @@ USER_REGISTER_TEMPLATE = """<!DOCTYPE html>
                     <input type="email" id="email" name="email">
                 </div>
                 <div class="form-group">
-                    <label for="profile_photo">🖼️ URL photo de profil (optionnel)</label>
-                    <input type="text" id="profile_photo" name="profile_photo" placeholder="https://exemple.com/photo.jpg">
+                    <label for="profile_photo">🖼️ Photo de profil (optionnel)</label>
+                    <input type="file" id="profile_photo" name="profile_photo" accept="image/*" style="padding: 8px; width: 100%; border: 2px solid #e0e0e0; border-radius: 12px; font-size: 14px;">
+                    <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
+                        Formats acceptés: JPG, PNG, GIF, WEBP (max 5 MB)
+                    </small>
                 </div>
                 <div class="form-group">
                     <label for="password">🔒 Mot de passe</label>

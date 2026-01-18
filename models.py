@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
+import uuid
 
 db = SQLAlchemy()
 
@@ -12,31 +13,92 @@ class User(db.Model):
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=True)
     password = db.Column(db.String(255), nullable=False)
-    profile_photo = db.Column(db.String(255), nullable=True)
+    profile_photo = db.Column(db.String(255), nullable=True)  # Chemin vers le fichier uploadé
     is_admin = db.Column(db.Boolean, default=False)
     is_approved = db.Column(db.Boolean, default=False)  # Approuvé par admin
-    subscription_plan = db.Column(db.String(20), default='free')  # free, premium, vip
-    subscription_status = db.Column(db.String(20), default='inactive')  # inactive, active, expired
-    subscription_expires_at = db.Column(db.DateTime, nullable=True)
+    is_active = db.Column(db.Boolean, default=True)  # Compte activé/désactivé par admin
+    subscription_plan = db.Column(db.String(20), default='free')  # free, premium, vip (legacy)
+    subscription_status = db.Column(db.String(20), default='inactive')  # inactive, active, expired (legacy)
+    subscription_expires_at = db.Column(db.DateTime, nullable=True)  # Legacy
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login_at = db.Column(db.DateTime, nullable=True)
     ip_address = db.Column(db.String(45), nullable=True)  # Pour traçabilité
+    
+    # ID unique immuable pour protection des données
+    unique_id = db.Column(db.String(36), unique=True, nullable=False, index=True)  # UUID pour identification permanente
 
     def has_paid_access(self):
-        """Vérifie si l'utilisateur a un accès payant actif"""
-        if self.subscription_status != 'active':
+        """Vérifie si l'utilisateur a un accès payant actif (nouveau système)"""
+        if self.is_admin:
+            return True
+        if not self.is_approved or not self.is_active:
             return False
-        if self.subscription_expires_at and self.subscription_expires_at < datetime.utcnow():
-            return False
-        return self.subscription_plan in ['premium', 'vip']
+        
+        # Vérifier les abonnements actifs
+        active_subscription = UserSubscription.query.filter_by(
+            user_id=self.id,
+            is_active=True
+        ).filter(
+            UserSubscription.expires_at > datetime.utcnow()
+        ).first()
+        
+        if active_subscription:
+            return True
+        
+        # Fallback sur l'ancien système (legacy)
+        if self.subscription_status == 'active':
+            if self.subscription_expires_at and self.subscription_expires_at < datetime.utcnow():
+                return False
+            return self.subscription_plan in ['premium', 'vip']
+        
+        return False
+
+    def get_active_subscription(self):
+        """Récupère l'abonnement actif de l'utilisateur"""
+        return UserSubscription.query.filter_by(
+            user_id=self.id,
+            is_active=True
+        ).filter(
+            UserSubscription.expires_at > datetime.utcnow()
+        ).first()
+
+    def get_plan_limits(self):
+        """Récupère les limites du plan actif"""
+        subscription = self.get_active_subscription()
+        if subscription and subscription.plan:
+            return {
+                'predictions_per_day': subscription.plan.predictions_per_day,
+                'plan_name': subscription.plan.name
+            }
+        return None
 
     def can_view_predictions(self):
         """Vérifie si l'utilisateur peut voir les prédictions"""
         if self.is_admin:
             return True
-        if not self.is_approved:
+        if not self.is_approved or not self.is_active:
             return False
         return self.has_paid_access()
+    
+    def get_predictions_viewed_today(self):
+        """Compte le nombre de prédictions consultées aujourd'hui"""
+        today = datetime.utcnow().date()
+        return UserPredictionAccess.query.filter_by(
+            user_id=self.id,
+            access_date=today
+        ).count()
+    
+    def can_view_more_predictions_today(self):
+        """Vérifie si l'utilisateur peut encore voir des prédictions aujourd'hui"""
+        if self.is_admin:
+            return True
+        
+        plan_limits = self.get_plan_limits()
+        if not plan_limits:
+            return False
+        
+        viewed_today = self.get_predictions_viewed_today()
+        return viewed_today < plan_limits['predictions_per_day']
 
     def __repr__(self) -> str:
         return f"<User {self.username}>"
@@ -311,3 +373,181 @@ class AnomalyLog(db.Model):
     def __repr__(self) -> str:
         return f"<AnomalyLog {self.anomaly_type} - {self.match_id}>"
 
+
+# ========== MODÈLES SYSTÈME ORACXPRED COMPLET ==========
+
+class SubscriptionPlan(db.Model):
+    """Plans d'abonnement dynamiques créés par l'admin"""
+    __tablename__ = "subscription_plans"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)  # Nom du plan
+    description = db.Column(db.Text, nullable=True)
+    
+    # Limites du plan
+    predictions_per_day = db.Column(db.Integer, nullable=False, default=3)  # Nombre de prédictions par jour
+    duration_days = db.Column(db.Integer, nullable=False)  # Durée en jours (7, 30, etc.)
+    duration_type = db.Column(db.String(20), nullable=False)  # 'week', 'month', 'long'
+    
+    # Tarif
+    price_fcfa = db.Column(db.Float, nullable=False)  # Prix en FCFA
+    
+    # Statut
+    is_active = db.Column(db.Boolean, default=True)  # Plan actif ou non
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Admin créateur
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self) -> str:
+        return f"<SubscriptionPlan {self.name} - {self.predictions_per_day}/jour - {self.price_fcfa} FCFA>"
+
+
+class UserSubscription(db.Model):
+    """Abonnements actifs des utilisateurs"""
+    __tablename__ = "user_subscriptions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('subscription_plans.id'), nullable=False)
+    
+    # Dates
+    start_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    
+    # Statut
+    is_active = db.Column(db.Boolean, default=True)
+    auto_renew = db.Column(db.Boolean, default=False)
+    
+    # Métadonnées
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    extra_data = db.Column(db.Text, nullable=True)  # JSON
+    
+    # Relation
+    plan = db.relationship('SubscriptionPlan', backref='subscriptions')
+    
+    def is_expired(self):
+        """Vérifie si l'abonnement est expiré"""
+        return datetime.utcnow() > self.expires_at
+    
+    def __repr__(self) -> str:
+        return f"<UserSubscription user:{self.user_id} plan:{self.plan_id} expires:{self.expires_at}>"
+
+
+class UserPredictionAccess(db.Model):
+    """Suivi des accès aux prédictions par utilisateur (limitation par plan)"""
+    __tablename__ = "user_prediction_access"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    prediction_id = db.Column(db.Integer, db.ForeignKey('predictions.id'), nullable=False, index=True)
+    access_date = db.Column(db.Date, nullable=False, default=datetime.utcnow, index=True)  # Date d'accès (pour compter par jour)
+    accessed_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    
+    def __repr__(self) -> str:
+        return f"<UserPredictionAccess user:{self.user_id} prediction:{self.prediction_id}>"
+
+
+class Notification(db.Model):
+    """Système de notifications (globale ou ciblée)"""
+    __tablename__ = "notifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Destinataire
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True, index=True)  # None = notification globale
+    is_global = db.Column(db.Boolean, default=False)  # Notification pour tous les utilisateurs
+    
+    # Contenu
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.String(20), default='normal')  # low, normal, high, urgent
+    notification_type = db.Column(db.String(50), default='info')  # info, warning, success, error
+    
+    # Affichage
+    display_duration = db.Column(db.Integer, default=5000)  # Durée d'affichage en ms
+    is_read = db.Column(db.Boolean, default=False)
+    read_at = db.Column(db.DateTime, nullable=True)
+    
+    # Expiration
+    expires_at = db.Column(db.DateTime, nullable=True)  # Date d'expiration de la notification
+    
+    # Créateur
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # Admin créateur
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    # Canaux (prêt pour extension Telegram/WhatsApp)
+    channels = db.Column(db.Text, nullable=True)  # JSON: ['internal', 'telegram', 'whatsapp']
+    
+    def __repr__(self) -> str:
+        return f"<Notification {self.title} - {'global' if self.is_global else f'user:{self.user_id}'}>"
+
+
+class PersistentSession(db.Model):
+    """Sessions persistantes pour reconnexion automatique après redémarrage serveur"""
+    __tablename__ = "persistent_sessions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    session_token = db.Column(db.String(255), unique=True, nullable=False, index=True)  # Token unique pour la session
+    session_data = db.Column(db.Text, nullable=True)  # JSON avec données de session
+    
+    # Expiration
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    last_activity = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Métadonnées
+    ip_address = db.Column(db.String(45), nullable=True)
+    user_agent = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    def is_expired(self):
+        """Vérifie si la session est expirée"""
+        return datetime.utcnow() > self.expires_at
+    
+    def __repr__(self) -> str:
+        return f"<PersistentSession user:{self.user_id} expires:{self.expires_at}>"
+
+
+class BackupLog(db.Model):
+    """Logs des sauvegardes automatiques"""
+    __tablename__ = "backup_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    backup_type = db.Column(db.String(20), nullable=False)  # 'daily', 'weekly', 'manual'
+    backup_path = db.Column(db.String(500), nullable=False)  # Chemin du fichier de sauvegarde
+    file_size = db.Column(db.BigInteger, nullable=True)  # Taille en octets
+    
+    # Statut
+    status = db.Column(db.String(20), default='success')  # success, failed, partial
+    error_message = db.Column(db.Text, nullable=True)
+    
+    # Métadonnées
+    tables_backed_up = db.Column(db.Text, nullable=True)  # JSON avec liste des tables
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Admin si manuel
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    def __repr__(self) -> str:
+        return f"<BackupLog {self.backup_type} - {self.status} - {self.created_at}>"
+
+
+class PredictionSchedule(db.Model):
+    """Planification des prédictions par l'admin"""
+    __tablename__ = "prediction_schedules"
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Configuration
+    predictions_per_day = db.Column(db.Integer, nullable=False, default=3)
+    publication_times = db.Column(db.Text, nullable=True)  # JSON avec heures de publication ["08:00", "14:00", "20:00"]
+    publication_delays = db.Column(db.Text, nullable=True)  # JSON avec délais en minutes
+    
+    # Statut
+    is_active = db.Column(db.Boolean, default=True)
+    
+    # Métadonnées
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def __repr__(self) -> str:
+        return f"<PredictionSchedule {self.predictions_per_day}/jour - {'active' if self.is_active else 'inactive'}>"
