@@ -454,13 +454,13 @@ def admin_login():
         return admin_bp.view_functions['admin_login']()
     except (ImportError, KeyError):
         # Fallback sur l'ancien système
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
+        if request.method == 'POST':
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '').strip()
 
             try:
-        user = User.query.filter_by(username=username).first()
-        if user and user.password == password and user.is_admin:
+                user = User.query.filter_by(username=username).first()
+                if user and user.password == password and user.is_admin:
                     # Vérifier is_active si la colonne existe
                     try:
                         if hasattr(user, 'is_active') and not user.is_active:
@@ -468,27 +468,27 @@ def admin_login():
                     except:
                         pass
                     
-            session['admin_logged_in'] = True
-            session['admin_username'] = username
-            session['admin_id'] = user.id
+                    session['admin_logged_in'] = True
+                    session['admin_username'] = username
+                    session['admin_id'] = user.id
                     session['user_id'] = user.id  # Compatibilité nouveau système
                     session['username'] = username
                     session['is_admin'] = True
                     
-            user.last_login_at = datetime.datetime.utcnow()
-            db.session.commit()
-            log_action('admin_login', f"Connexion admin: {username}", admin_id=user.id, severity='info')
-            return redirect(url_for('admin_dashboard'))
+                    user.last_login_at = datetime.datetime.utcnow()
+                    db.session.commit()
+                    log_action('admin_login', f"Connexion admin: {username}", admin_id=user.id, severity='info')
+                    return redirect(url_for('admin_dashboard'))
+
+                log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
+                return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
             except Exception as e:
                 print(f"❌ Erreur lors de la connexion admin: {e}")
                 import traceback
                 traceback.print_exc()
                 return render_template_string(ADMIN_LOGIN_TEMPLATE, error=f"Erreur: {str(e)}")
 
-        log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
-        return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
-
-    return render_template_string(ADMIN_LOGIN_TEMPLATE)
+        return render_template_string(ADMIN_LOGIN_TEMPLATE)
 
 
 @app.route('/admin/logout')
@@ -499,13 +499,13 @@ def admin_logout():
         return admin_bp.view_functions['admin_logout']()
     except (ImportError, KeyError):
         # Fallback sur l'ancien système
-    session.pop('admin_logged_in', None)
-    session.pop('admin_username', None)
+        session.pop('admin_logged_in', None)
+        session.pop('admin_username', None)
         session.pop('admin_id', None)
         session.pop('user_id', None)
         session.pop('username', None)
         session.pop('is_admin', None)
-    return redirect(url_for('home'))
+        return redirect(url_for('home'))
 
 
 @app.route('/admin/dashboard')
