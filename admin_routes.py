@@ -25,6 +25,140 @@ from prediction_manager import log_action
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
 
+# ========== FONCTIONS DE TEMPLATES (DOIT ÊTRE AVANT LES ROUTES) ==========
+
+def get_admin_template(name):
+    """Récupère un template admin depuis fifa1.py"""
+    try:
+        from fifa1 import (
+            ADMIN_LOGIN_TEMPLATE, ADMIN_DASHBOARD_TEMPLATE
+        )
+        templates = {
+            'login': ADMIN_LOGIN_TEMPLATE,
+            'dashboard': ADMIN_DASHBOARD_TEMPLATE,
+        }
+        template = templates.get(name)
+        if template and not template.startswith('<!--'):
+            return template
+    except (ImportError, AttributeError) as e:
+        print(f"⚠️ Erreur lors du chargement du template {name}: {e}")
+    
+    # Retourner un template simple par défaut
+    return get_simple_admin_template(name)
+
+
+def get_simple_admin_template(name, **kwargs):
+    """Retourne un template simple par défaut"""
+    if name == 'login':
+        return """<!DOCTYPE html>
+<html><head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Connexion Admin - ORACXPRED</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container { 
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 50px;
+            max-width: 450px;
+            width: 100%;
+        }
+        h2 { text-align: center; color: #333; margin-bottom: 30px; font-size: 28px; }
+        .form-group { margin-bottom: 25px; }
+        label { display: block; margin-bottom: 8px; color: #555; font-weight: 600; }
+        input { width: 100%; padding: 15px; border: 2px solid #e0e0e0; border-radius: 10px; font-size: 16px; }
+        input:focus { outline: none; border-color: #667eea; }
+        .btn { width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: 600; cursor: pointer; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4); }
+        .error { background: #fee; color: #c33; padding: 12px; border-radius: 8px; margin-bottom: 20px; text-align: center; }
+        .links { text-align: center; margin-top: 25px; padding-top: 25px; border-top: 1px solid #e0e0e0; }
+        .links a { color: #667eea; text-decoration: none; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🔐 Connexion Admin</h2>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <div class="form-group">
+                <label for="username">Nom d'utilisateur :</label>
+                <input type="text" id="username" name="username" required autofocus>
+            </div>
+            <div class="form-group">
+                <label for="password">Mot de passe :</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit" class="btn">Se connecter</button>
+        </form>
+        <div class="links">
+            <a href="/">← Retour à l'accueil</a>
+        </div>
+    </div>
+</body>
+</html>"""
+    elif name == 'users':
+        return """<!DOCTYPE html>
+<html><head><title>Utilisateurs - Admin</title></head>
+<body>
+    <h1>Gestion des Utilisateurs</h1>
+    <table border="1">
+        <tr><th>ID</th><th>Username</th><th>Email</th><th>Admin</th><th>Approuvé</th></tr>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ user.email or '-' }}</td>
+            <td>{{ 'Oui' if user.is_admin else 'Non' }}</td>
+            <td>{{ 'Oui' if user.is_approved else 'Non' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</body></html>"""
+    elif name == 'plans':
+        return """<!DOCTYPE html>
+<html><head><title>Plans - Admin</title></head>
+<body>
+    <h1>Gestion des Plans</h1>
+    <p>Page en cours de développement...</p>
+</body></html>"""
+    elif name == 'predictions':
+        return """<!DOCTYPE html>
+<html><head><title>Prédictions - Admin</title></head>
+<body>
+    <h1>Gestion des Prédictions</h1>
+    <p>Page en cours de développement...</p>
+</body></html>"""
+    elif name == 'notifications':
+        return """<!DOCTYPE html>
+<html><head><title>Notifications - Admin</title></head>
+<body>
+    <h1>Gestion des Notifications</h1>
+    <p>Page en cours de développement...</p>
+</body></html>"""
+    elif name == 'backups':
+        return """<!DOCTYPE html>
+<html><head><title>Sauvegardes - Admin</title></head>
+<body>
+    <h1>Gestion des Sauvegardes</h1>
+    <p>Page en cours de développement...</p>
+</body></html>"""
+    
+    return f"<html><body><h1>Template {name} non disponible</h1></body></html>"
+
+
 def require_admin(f):
     """Décorateur pour exiger les droits admin"""
     @wraps(f)
@@ -58,6 +192,15 @@ def require_admin(f):
 @admin_bp.route('/login', methods=['GET', 'POST'])
 def admin_login():
     """Connexion admin séparée"""
+    try:
+        template = get_admin_template('login')
+        if not template or template.startswith('<!--'):
+            # Fallback si le template n'est pas chargé
+            template = get_simple_admin_template('login')
+    except Exception as e:
+        print(f"⚠️ Erreur lors du chargement du template: {e}")
+        template = get_simple_admin_template('login')
+    
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
@@ -67,9 +210,14 @@ def admin_login():
             user = User.query.filter_by(username=username).first()
             if user and user.password == password and user.is_admin:
                 # Vérifier que le compte est actif
-                if not user.is_active:
+                try:
+                    is_active = user.is_active if hasattr(user, 'is_active') else True
+                except:
+                    is_active = True
+                
+                if not is_active:
                     log_action('admin_login_failed', f"Tentative de connexion admin désactivé: {username}", severity='warning')
-                    return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Compte admin désactivé")
+                    return render_template_string(template, error="Compte admin désactivé")
                 
                 # Compatibilité avec l'ancien système
                 session['admin_logged_in'] = True
@@ -97,14 +245,14 @@ def admin_login():
                 return redirect(url_for('admin.admin_dashboard'))
             
             log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
-            return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
+            return render_template_string(template, error="Identifiants admin incorrects")
         except Exception as e:
             print(f"❌ Erreur lors de la connexion admin: {e}")
             import traceback
             traceback.print_exc()
-            return render_template_string(ADMIN_LOGIN_TEMPLATE, error=f"Erreur: {str(e)}")
+            return render_template_string(template, error=f"Erreur: {str(e)}")
     
-    return render_template_string(ADMIN_LOGIN_TEMPLATE)
+    return render_template_string(template)
 
 
 @admin_bp.route('/logout')
@@ -151,17 +299,34 @@ def admin_dashboard():
     # Logs récents
     recent_logs = SystemLog.query.order_by(SystemLog.created_at.desc()).limit(20).all()
     
-    return render_template_string(ADMIN_DASHBOARD_TEMPLATE,
-        admin_user=admin_user,
-        total_users=total_users,
-        active_subscriptions=active_subscriptions,
-        pending_approvals=pending_approvals,
-        total_predictions=total_predictions,
-        active_predictions=active_predictions,
-        recently_expired=recently_expired,
-        unread_notifications=unread_notifications,
-        recent_logs=recent_logs
-    )
+    try:
+        template = get_admin_template('dashboard')
+        return render_template_string(template,
+            admin_user=admin_user,
+            total_users=total_users,
+            active_subscriptions=active_subscriptions,
+            pending_approvals=pending_approvals,
+            total_predictions=total_predictions,
+            active_predictions=active_predictions,
+            recently_expired=recently_expired,
+            unread_notifications=unread_notifications,
+            recent_logs=recent_logs
+        )
+    except Exception as e:
+        print(f"❌ Erreur lors du rendu du dashboard: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"""
+        <html>
+        <head><title>Erreur Dashboard</title></head>
+        <body>
+            <h1>Erreur lors du chargement du dashboard</h1>
+            <p>Erreur: {str(e)}</p>
+            <p>Admin User: {admin_user.username if admin_user else 'None'}</p>
+            <p>Total Users: {total_users}</p>
+        </body>
+        </html>
+        """
 
 
 # ========== GESTION DES UTILISATEURS ==========
@@ -171,7 +336,8 @@ def admin_dashboard():
 def admin_users():
     """Liste des utilisateurs"""
     users = User.query.order_by(User.created_at.desc()).all()
-    return render_template_string(ADMIN_USERS_TEMPLATE, users=users)
+    template = get_admin_template('users')
+    return render_template_string(template, users=users)
 
 
 @admin_bp.route('/user/<int:user_id>/toggle_active', methods=['POST'])
@@ -261,7 +427,8 @@ def admin_set_subscription(user_id):
 def admin_plans():
     """Gestion des plans tarifaires"""
     plans = SubscriptionPlan.query.order_by(SubscriptionPlan.created_at.desc()).all()
-    return render_template_string(ADMIN_PLANS_TEMPLATE, plans=plans)
+    template = get_admin_template('plans')
+    return render_template_string(template, plans=plans)
 
 
 @admin_bp.route('/plan/create', methods=['POST'])
@@ -353,7 +520,8 @@ def admin_predictions():
     predictions = Prediction.query.order_by(Prediction.created_at.desc()).limit(100).all()
     schedule = PredictionSchedule.query.filter_by(is_active=True).first()
     
-    return render_template_string(ADMIN_PREDICTIONS_TEMPLATE,
+    template = get_admin_template('predictions')
+    return render_template_string(template,
         predictions=predictions,
         schedule=schedule
     )
@@ -416,7 +584,8 @@ def admin_invalidate_prediction(prediction_id):
 def admin_notifications():
     """Gestion des notifications"""
     notifications = Notification.query.order_by(Notification.created_at.desc()).limit(100).all()
-    return render_template_string(ADMIN_NOTIFICATIONS_TEMPLATE, notifications=notifications)
+    template = get_admin_template('notifications')
+    return render_template_string(template, notifications=notifications)
 
 
 @admin_bp.route('/notification/create', methods=['POST'])
@@ -494,7 +663,8 @@ def admin_create_backup():
 def admin_backups():
     """Liste des sauvegardes"""
     backups = BackupLog.query.order_by(BackupLog.created_at.desc()).limit(50).all()
-    return render_template_string(ADMIN_BACKUPS_TEMPLATE, backups=backups)
+    template = get_admin_template('backups')
+    return render_template_string(template, backups=backups)
 
 
 # ========== TASKS AUTOMATIQUES ==========
@@ -519,11 +689,13 @@ def admin_run_cleanup():
     })
 
 
-# Templates seront définis dans un fichier séparé ou dans fifa1.py
-ADMIN_LOGIN_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
-ADMIN_DASHBOARD_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
-ADMIN_USERS_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
-ADMIN_PLANS_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
-ADMIN_PREDICTIONS_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
-ADMIN_NOTIFICATIONS_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
-ADMIN_BACKUPS_TEMPLATE = """<!-- Template sera défini dans fifa1.py -->"""
+# Les fonctions sont maintenant définies au début du fichier
+
+# Variables pour compatibilité
+ADMIN_LOGIN_TEMPLATE = None
+ADMIN_DASHBOARD_TEMPLATE = None
+ADMIN_USERS_TEMPLATE = None
+ADMIN_PLANS_TEMPLATE = None
+ADMIN_PREDICTIONS_TEMPLATE = None
+ADMIN_NOTIFICATIONS_TEMPLATE = None
+ADMIN_BACKUPS_TEMPLATE = None
