@@ -25,7 +25,7 @@ class User(db.Model):
     ip_address = db.Column(db.String(45), nullable=True)  # Pour traçabilité
     
     # ID unique immuable pour protection des données
-    unique_id = db.Column(db.String(36), unique=True, nullable=False, index=True)  # UUID pour identification permanente
+    unique_id = db.Column(db.String(36), unique=True, nullable=True, index=True)  # UUID pour identification permanente (nullable au départ pour migration)
 
     def has_paid_access(self):
         """Vérifie si l'utilisateur a un accès payant actif (nouveau système)"""

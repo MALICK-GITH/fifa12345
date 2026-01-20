@@ -101,10 +101,25 @@ app.secret_key = 'oracxpred-metaphore-secret-key-2024'  # Clé secrète pour les
 db.init_app(app)
 
 with app.app_context():
-    db.create_all()
+    # Vérifier et corriger la base de données si nécessaire
+    try:
+        from check_and_fix_db import check_and_fix_database
+        check_and_fix_database(app)
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la vérification: {e}")
+    
+    # Créer toutes les tables manquantes
+    try:
+        db.create_all()
+    except Exception as e:
+        print(f"⚠️ Erreur lors de la création des tables: {e}")
+    
     # Initialiser les unique_id pour les utilisateurs existants
-    from oracxpred_utils import initialize_user_unique_ids
-    initialize_user_unique_ids()
+    try:
+        from oracxpred_utils import initialize_user_unique_ids
+        initialize_user_unique_ids()
+    except Exception as e:
+        print(f"⚠️ Erreur lors de l'initialisation des unique_id: {e}")
     
     # Créer les plans par défaut s'ils n'existent pas
     if SubscriptionPlan.query.count() == 0:
@@ -408,36 +423,89 @@ def home():
 # ========== ROUTES ADMIN + UTILISATEURS ==========
 
 def is_admin():
-    return session.get("admin_logged_in") is True
+    """Vérifie si l'utilisateur connecté est admin"""
+    # Compatibilité avec l'ancien système
+    if session.get("admin_logged_in"):
+        return True
+    # Nouveau système via user_id
+    user_id = session.get('user_id')
+    if user_id:
+        try:
+            user = User.query.get(user_id)
+            if user and user.is_admin:
+                # Vérifier is_active si la colonne existe
+                try:
+                    if hasattr(user, 'is_active') and not user.is_active:
+                        return False
+                except:
+                    pass
+                return True
+        except Exception:
+            pass
+    return False
 
 
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '').strip()
+    """Route admin login - redirige vers le blueprint si disponible"""
+    try:
+        # Essayer d'utiliser le blueprint
+        from admin_routes import admin_bp
+        return admin_bp.view_functions['admin_login']()
+    except (ImportError, KeyError):
+        # Fallback sur l'ancien système
+        if request.method == 'POST':
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '').strip()
 
-        user = User.query.filter_by(username=username).first()
-        if user and user.password == password and user.is_admin:
-            session['admin_logged_in'] = True
-            session['admin_username'] = username
-            session['admin_id'] = user.id
-            user.last_login_at = datetime.datetime.utcnow()
-            db.session.commit()
-            log_action('admin_login', f"Connexion admin: {username}", admin_id=user.id, severity='info')
-            return redirect(url_for('admin_dashboard'))
+            try:
+                user = User.query.filter_by(username=username).first()
+                if user and user.password == password and user.is_admin:
+                    # Vérifier is_active si la colonne existe
+                    try:
+                        if hasattr(user, 'is_active') and not user.is_active:
+                            return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Compte admin désactivé")
+                    except:
+                        pass
+                    
+                    session['admin_logged_in'] = True
+                    session['admin_username'] = username
+                    session['admin_id'] = user.id
+                    session['user_id'] = user.id  # Compatibilité nouveau système
+                    session['username'] = username
+                    session['is_admin'] = True
+                    
+                    user.last_login_at = datetime.datetime.utcnow()
+                    db.session.commit()
+                    log_action('admin_login', f"Connexion admin: {username}", admin_id=user.id, severity='info')
+                    return redirect(url_for('admin_dashboard'))
+            except Exception as e:
+                print(f"❌ Erreur lors de la connexion admin: {e}")
+                import traceback
+                traceback.print_exc()
+                return render_template_string(ADMIN_LOGIN_TEMPLATE, error=f"Erreur: {str(e)}")
 
-        log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
-        return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
+            log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
+            return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
 
-    return render_template_string(ADMIN_LOGIN_TEMPLATE)
+        return render_template_string(ADMIN_LOGIN_TEMPLATE)
 
 
 @app.route('/admin/logout')
 def admin_logout():
-    session.pop('admin_logged_in', None)
-    session.pop('admin_username', None)
-    return redirect(url_for('home'))
+    """Route admin logout - redirige vers le blueprint si disponible"""
+    try:
+        from admin_routes import admin_bp
+        return admin_bp.view_functions['admin_logout']()
+    except (ImportError, KeyError):
+        # Fallback sur l'ancien système
+        session.pop('admin_logged_in', None)
+        session.pop('admin_username', None)
+        session.pop('admin_id', None)
+        session.pop('user_id', None)
+        session.pop('username', None)
+        session.pop('is_admin', None)
+        return redirect(url_for('home'))
 
 
 @app.route('/admin/dashboard')
@@ -2891,7 +2959,7 @@ def match_details(match_id):
                             // Recréer le graphique actuel
                             const activeTab = document.querySelector('.tab-btn.active');
                             if (activeTab) {{
-                                const chartType = activeTab.onclick.toString().match(/showChart\('(.+?)'\)/)[1];
+                                const chartType = activeTab.onclick.toString().match(/showChart\\('(.+?)'\\)/)[1];
                                 createChart(chartType);
                             }}
                         }}

@@ -29,13 +29,29 @@ def require_admin(f):
     """Décorateur pour exiger les droits admin"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        # Compatibilité avec l'ancien système
+        admin_logged_in = session.get('admin_logged_in')
+        admin_id = session.get('admin_id')
         user_id = session.get('user_id')
-        if not user_id:
-            return redirect(url_for('admin.admin_login'))
-        user = User.query.get(user_id)
-        if not user or not user.is_admin:
-            return redirect(url_for('admin.admin_login'))
-        return f(*args, **kwargs)
+        
+        # Vérifier via l'ancien système ou le nouveau
+        if admin_logged_in and admin_id:
+            try:
+                user = User.query.get(admin_id)
+                if user and user.is_admin and user.is_active:
+                    return f(*args, **kwargs)
+            except Exception as e:
+                print(f"❌ Erreur lors de la vérification admin: {e}")
+        
+        if user_id:
+            try:
+                user = User.query.get(user_id)
+                if user and user.is_admin and user.is_active:
+                    return f(*args, **kwargs)
+            except Exception as e:
+                print(f"❌ Erreur lors de la vérification admin: {e}")
+        
+        return redirect(url_for('admin.admin_login'))
     return decorated_function
 
 
@@ -47,29 +63,46 @@ def admin_login():
         password = request.form.get('password', '').strip()
         remember_me = request.form.get('remember_me') == 'on'
 
-        user = User.query.filter_by(username=username, is_admin=True).first()
-        if user and user.password == password:
-            session['user_id'] = user.id
-            session['username'] = user.username
-            session['is_admin'] = True
+        try:
+            user = User.query.filter_by(username=username).first()
+            if user and user.password == password and user.is_admin:
+                # Vérifier que le compte est actif
+                if not user.is_active:
+                    log_action('admin_login_failed', f"Tentative de connexion admin désactivé: {username}", severity='warning')
+                    return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Compte admin désactivé")
+                
+                # Compatibilité avec l'ancien système
+                session['admin_logged_in'] = True
+                session['admin_username'] = username
+                session['admin_id'] = user.id
+                
+                # Nouveau système
+                session['user_id'] = user.id
+                session['username'] = user.username
+                session['is_admin'] = True
+                
+                # Créer une session persistante si "Se souvenir de moi"
+                if remember_me:
+                    token = create_persistent_session(
+                        user.id,
+                        ip_address=request.remote_addr,
+                        user_agent=request.headers.get('User-Agent'),
+                        duration_days=30
+                    )
+                    session['persistent_token'] = token
+                
+                user.last_login_at = datetime.utcnow()
+                db.session.commit()
+                log_action('admin_login', f"Connexion admin: {username}", user_id=user.id, severity='info')
+                return redirect(url_for('admin.admin_dashboard'))
             
-            # Créer une session persistante si "Se souvenir de moi"
-            if remember_me:
-                token = create_persistent_session(
-                    user.id,
-                    ip_address=request.remote_addr,
-                    user_agent=request.headers.get('User-Agent'),
-                    duration_days=30
-                )
-                session['persistent_token'] = token
-            
-            user.last_login_at = datetime.utcnow()
-            db.session.commit()
-            log_action('admin_login', f"Connexion admin: {username}", user_id=user.id, severity='info')
-            return redirect(url_for('admin.admin_dashboard'))
-        
-        log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
-        return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
+            log_action('admin_login_failed', f"Tentative de connexion admin échouée: {username}", severity='warning')
+            return render_template_string(ADMIN_LOGIN_TEMPLATE, error="Identifiants admin incorrects")
+        except Exception as e:
+            print(f"❌ Erreur lors de la connexion admin: {e}")
+            import traceback
+            traceback.print_exc()
+            return render_template_string(ADMIN_LOGIN_TEMPLATE, error=f"Erreur: {str(e)}")
     
     return render_template_string(ADMIN_LOGIN_TEMPLATE)
 

@@ -241,11 +241,28 @@ def ensure_user_unique_id(user):
 
 def initialize_user_unique_ids():
     """Initialise les unique_id pour tous les utilisateurs qui n'en ont pas"""
-    users_without_id = User.query.filter_by(unique_id=None).all()
-    for user in users_without_id:
-        user.unique_id = str(uuid.uuid4())
-    db.session.commit()
-    return len(users_without_id)
+    try:
+        # Vérifier si la colonne unique_id existe
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        columns = [col['name'] for col in inspector.get_columns('users')]
+        
+        if 'unique_id' not in columns:
+            print("⚠️ Colonne unique_id n'existe pas encore, sera créée par la migration")
+            return 0
+        
+        users_without_id = User.query.filter(
+            (User.unique_id == None) | (User.unique_id == '')
+        ).all()
+        
+        for user in users_without_id:
+            user.unique_id = str(uuid.uuid4())
+        
+        db.session.commit()
+        return len(users_without_id)
+    except Exception as e:
+        print(f"⚠️ Erreur lors de l'initialisation des unique_id: {e}")
+        return 0
 
 
 # ========== GESTION DES ABONNEMENTS ==========
