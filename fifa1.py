@@ -110,7 +110,7 @@ with app.app_context():
     
     # Créer toutes les tables manquantes
     try:
-    db.create_all()
+        db.create_all()
     except Exception as e:
         print(f"⚠️ Erreur lors de la création des tables: {e}")
     
