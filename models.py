@@ -551,3 +551,103 @@ class PredictionSchedule(db.Model):
     
     def __repr__(self) -> str:
         return f"<PredictionSchedule {self.predictions_per_day}/jour - {'active' if self.is_active else 'inactive'}>"
+
+
+# ========== SYSTÈME DE COLLECTE DES MATCHS EN TEMPS RÉEL ==========
+
+class CollectedMatch(db.Model):
+    """Matchs collectés en temps réel - Base de données vivante pour ORACXPRED"""
+    __tablename__ = "collected_matches"
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Identification unique
+    unique_match_id = db.Column(db.String(100), unique=True, nullable=False, index=True)  # ID unique externe
+    
+    # Informations du match
+    jeu = db.Column(db.String(50), nullable=False)  # FIFA / eFootball / FC
+    equipe_domicile = db.Column(db.String(200), nullable=False)
+    equipe_exterieur = db.Column(db.String(200), nullable=False)
+    
+    # Horodatage
+    heure_debut = db.Column(db.DateTime, nullable=False)
+    heure_fin = db.Column(db.DateTime, nullable=True)
+    timestamp_enregistrement = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Scores et résultats
+    score_domicile = db.Column(db.Integer, nullable=True)
+    score_exterieur = db.Column(db.Integer, nullable=True)
+    equipe_gagnante = db.Column(db.String(200), nullable=True)  # Nom de l'équipe gagnante ou "Match nul"
+    
+    # Statut du match
+    statut = db.Column(db.String(20), default='en_attente')  # en_attente, en_cours, termine, annule
+    
+    # Métadonnées de collecte
+    source_donnees = db.Column(db.String(100), nullable=True)  # API, scraper, simulé
+    collecte_par = db.Column(db.String(50), default='systeme_auto')  # système_auto, admin
+    
+    # Traçabilité
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    def to_dict(self):
+        """Convertit le match collecté en dictionnaire pour l'API"""
+        return {
+            'id': self.id,
+            'unique_match_id': self.unique_match_id,
+            'jeu': self.jeu,
+            'equipe_domicile': self.equipe_domicile,
+            'equipe_exterieur': self.equipe_exterieur,
+            'heure_debut': self.heure_debut.isoformat() if self.heure_debut else None,
+            'heure_fin': self.heure_fin.isoformat() if self.heure_fin else None,
+            'timestamp_enregistrement': self.timestamp_enregistrement.isoformat() if self.timestamp_enregistrement else None,
+            'score_domicile': self.score_domicile,
+            'score_exterieur': self.score_exterieur,
+            'equipe_gagnante': self.equipe_gagnante,
+            'statut': self.statut,
+            'source_donnees': self.source_donnees,
+            'collecte_par': self.collecte_par,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+    
+    def determine_gagnant(self):
+        """Détermine l'équipe gagnante basé sur le score"""
+        if self.score_domicile is None or self.score_exterieur is None:
+            return None
+        
+        if self.score_domicile > self.score_exterieur:
+            return self.equipe_domicile
+        elif self.score_exterieur > self.score_domicile:
+            return self.equipe_exterieur
+        else:
+            return "Match nul"
+    
+    def __repr__(self) -> str:
+        return f"<CollectedMatch {self.unique_match_id} - {self.equipe_domicile} vs {self.equipe_exterieur} - {self.statut}>"
+
+
+class MatchCollectionLog(db.Model):
+    """Logs du système de collecte pour monitoring et debugging"""
+    __tablename__ = "match_collection_logs"
+
+    id = db.Column(db.Integer, primary_key=True)
+    
+    # Action de collecte
+    action_type = db.Column(db.String(50), nullable=False)  # detection_start, detection_end, collecte_success, erreur
+    match_id = db.Column(db.String(100), nullable=True, index=True)  # Référence au unique_match_id
+    
+    # Description
+    message = db.Column(db.Text, nullable=False)
+    severity = db.Column(db.String(20), default='info')  # info, warning, error, critical
+    
+    # Métadonnées
+    source_donnees = db.Column(db.String(100), nullable=True)
+    temps_execution = db.Column(db.Float, nullable=True)  # Temps d'exécution en secondes
+    extra_data = db.Column(db.Text, nullable=True)  # JSON pour données supplémentaires
+    
+    # Horodatage
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+    
+    def __repr__(self) -> str:
+        return f"<MatchCollectionLog {self.action_type} - {self.match_id} - {self.severity}>"

@@ -13,7 +13,7 @@ from functools import wraps
 from models import (
     db, User, Prediction, SystemLog, SubscriptionPlan, UserSubscription,
     UserPredictionAccess, Notification, PersistentSession, BackupLog,
-    PredictionSchedule, Alert
+    PredictionSchedule, Alert, CollectedMatch, MatchCollectionLog
 )
 from oracxpred_utils import (
     save_profile_photo, delete_profile_photo, create_persistent_session,
@@ -687,6 +687,469 @@ def admin_run_cleanup():
         'expired_sessions': expired_sessions,
         'expired_subscriptions': expired_subscriptions
     })
+
+
+# ========== ROUTES POUR LA GESTION DES MATCHS COLLECTÉS ==========
+
+@admin_bp.route('/matchs-collectes')
+@require_admin
+def admin_matchs_collectes():
+    """Page admin des matchs collectés avec gestion complète"""
+    
+    # Récupérer les paramètres
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+    jeu_filter = request.args.get('jeu', 'all')
+    statut_filter = request.args.get('statut', 'all')
+    source_filter = request.args.get('source', 'all')
+    
+    # Construire la requête
+    query = CollectedMatch.query
+    
+    # Appliquer les filtres
+    if jeu_filter != 'all':
+        query = query.filter(CollectedMatch.jeu == jeu_filter)
+    
+    if statut_filter != 'all':
+        query = query.filter(CollectedMatch.statut == statut_filter)
+    
+    if source_filter != 'all':
+        query = query.filter(CollectedMatch.source_donnees == source_filter)
+    
+    # Ordre et pagination
+    matches_pagination = query.order_by(CollectedMatch.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    matches = matches_pagination.items
+    
+    # Statistiques détaillées
+    stats = {
+        'total_matches': CollectedMatch.query.count(),
+        'by_status': {},
+        'by_game': {},
+        'by_source': {},
+        'last_24h': CollectedMatch.query.filter(
+            CollectedMatch.created_at >= datetime.now() - timedelta(hours=24)
+        ).count(),
+        'last_7d': CollectedMatch.query.filter(
+            CollectedMatch.created_at >= datetime.now() - timedelta(days=7)
+        ).count()
+    }
+    
+    # Statuts
+    for status in ['en_attente', 'en_cours', 'termine', 'annule']:
+        stats['by_status'][status] = CollectedMatch.query.filter_by(statut=status).count()
+    
+    # Jeux
+    for game in ['FIFA', 'eFootball', 'FC']:
+        stats['by_game'][game] = CollectedMatch.query.filter_by(jeu=game).count()
+    
+    # Sources
+    sources = db.session.query(CollectedMatch.source_donnees, db.func.count(CollectedMatch.id)).group_by(CollectedMatch.source_donnees).all()
+    for source, count in sources:
+        stats['by_source'][source or 'unknown'] = count
+    
+    # Logs récents du système
+    recent_logs = MatchCollectionLog.query.order_by(MatchCollectionLog.created_at.desc()).limit(20).all()
+    
+    template = '''
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Matchs Collectés - Admin ORACXPRED</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; }
+            .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 15px; margin-bottom: 30px; }
+            .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+            .header p { opacity: 0.9; font-size: 1.1em; }
+            .nav-bar { background: white; padding: 15px; border-radius: 10px; margin-bottom: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .nav-bar a { color: #667eea; text-decoration: none; margin-right: 20px; padding: 8px 16px; border-radius: 5px; transition: all 0.3s; }
+            .nav-bar a:hover { background: #667eea; color: white; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+            .stat-card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }
+            .stat-number { font-size: 2.5em; font-weight: bold; color: #667eea; margin-bottom: 10px; }
+            .stat-label { color: #666; font-weight: 500; }
+            .filters { background: white; padding: 25px; border-radius: 15px; margin-bottom: 30px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+            .filter-row { display: flex; gap: 20px; flex-wrap: wrap; align-items: end; margin-bottom: 20px; }
+            .filter-group { display: flex; flex-direction: column; min-width: 150px; }
+            .filter-group label { font-weight: bold; margin-bottom: 8px; color: #333; }
+            .filter-group select { padding: 10px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; background: white; }
+            .btn { padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.3s; }
+            .btn-primary { background: #667eea; color: white; }
+            .btn-primary:hover { background: #5a6fd8; }
+            .btn-success { background: #28a745; color: white; }
+            .btn-warning { background: #ffc107; color: #212529; }
+            .btn-danger { background: #dc3545; color: white; }
+            .matches-table { background: white; border-radius: 15px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1); margin-bottom: 30px; }
+            .table { width: 100%; border-collapse: collapse; }
+            .table th { background: #667eea; color: white; padding: 15px; text-align: left; font-weight: 600; }
+            .table td { padding: 15px; border-bottom: 1px solid #eee; }
+            .table tr:hover { background: #f8f9fa; }
+            .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8em; font-weight: bold; text-transform: uppercase; }
+            .status-en_attente { background: #fff3cd; color: #856404; }
+            .status-en_cours { background: #cce5ff; color: #004085; }
+            .status-termine { background: #d4edda; color: #155724; }
+            .status-annule { background: #f8d7da; color: #721c24; }
+            .game-badge { padding: 4px 12px; border-radius: 15px; font-size: 0.8em; font-weight: bold; background: #667eea; color: white; }
+            .pagination { display: flex; justify-content: center; gap: 10px; margin: 30px 0; }
+            .pagination a { padding: 10px 15px; background: white; color: #667eea; text-decoration: none; border-radius: 8px; border: 1px solid #ddd; transition: all 0.3s; }
+            .pagination a:hover { background: #667eea; color: white; border-color: #667eea; }
+            .pagination .current { background: #667eea; color: white; border-color: #667eea; }
+            .logs-section { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+            .log-item { padding: 15px; border-left: 4px solid #667eea; margin-bottom: 15px; background: rgba(102,126,234,0.05); border-radius: 0 8px 8px 0; }
+            .log-time { font-size: 0.9em; color: #666; margin-bottom: 5px; }
+            .log-message { color: #333; font-weight: 500; }
+            .log-severity { padding: 2px 8px; border-radius: 12px; font-size: 0.7em; font-weight: bold; text-transform: uppercase; }
+            .severity-info { background: #e3f2fd; color: #1976d2; }
+            .severity-warning { background: #fff3e0; color: #f57c00; }
+            .severity-error { background: #ffebee; color: #d32f2f; }
+            .actions { display: flex; gap: 10px; }
+            .btn-sm { padding: 6px 12px; font-size: 0.8em; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🎮 Matchs Collectés - Admin</h1>
+                <p>Gestion complète du système de collecte ORACXPRED</p>
+            </div>
+            
+            <div class="nav-bar">
+                <a href="/admin/dashboard">🏠 Dashboard</a>
+                <a href="/admin/matchs-collectes">🎮 Matchs Collectés</a>
+                <a href="/admin/users">👥 Utilisateurs</a>
+                <a href="/admin/predictions">🔮 Prédictions</a>
+                <a href="/admin/logs">📊 Logs</a>
+                <a href="/admin/settings">⚙️ Paramètres</a>
+                <a href="/logout" style="margin-left: auto; background: #dc3545; color: white;">🚪 Déconnexion</a>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.total_matches }}</div>
+                    <div class="stat-label">Total Matchs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.last_24h }}</div>
+                    <div class="stat-label">Dernières 24h</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.last_7d }}</div>
+                    <div class="stat-label">Derniers 7 jours</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.by_status.en_cours }}</div>
+                    <div class="stat-label">En Cours</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.by_status.termine }}</div>
+                    <div class="stat-label">Terminés</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.by_game.FIFA }}</div>
+                    <div class="stat-label">FIFA</div>
+                </div>
+            </div>
+            
+            <div class="filters">
+                <form method="GET">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>Jeu</label>
+                            <select name="jeu">
+                                <option value="all" {% if jeu_filter == 'all' %}selected{% endif %}>Tous</option>
+                                <option value="FIFA" {% if jeu_filter == 'FIFA' %}selected{% endif %}>FIFA</option>
+                                <option value="eFootball" {% if jeu_filter == 'eFootball' %}selected{% endif %}>eFootball</option>
+                                <option value="FC" {% if jeu_filter == 'FC' %}selected{% endif %}>FC</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Statut</label>
+                            <select name="statut">
+                                <option value="all" {% if statut_filter == 'all' %}selected{% endif %}>Tous</option>
+                                <option value="en_attente" {% if statut_filter == 'en_attente' %}selected{% endif %}>En attente</option>
+                                <option value="en_cours" {% if statut_filter == 'en_cours' %}selected{% endif %}>En cours</option>
+                                <option value="termine" {% if statut_filter == 'termine' %}selected{% endif %}>Terminé</option>
+                                <option value="annule" {% if statut_filter == 'annule' %}selected{% endif %}>Annulé</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Source</label>
+                            <select name="source">
+                                <option value="all" {% if source_filter == 'all' %}selected{% endif %}>Toutes</option>
+                                {% for source in stats.by_source.keys() %}
+                                <option value="{{ source }}" {% if source_filter == source %}selected{% endif %}>{{ source }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>&nbsp;</label>
+                            <button type="submit" class="btn btn-primary">Appliquer</button>
+                        </div>
+                        <div class="filter-group">
+                            <label>&nbsp;</label>
+                            <button type="button" class="btn btn-success" onclick="location.reload()">🔄 Actualiser</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div class="matches-table">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Match</th>
+                            <th>Jeu</th>
+                            <th>Score</th>
+                            <th>Statut</th>
+                            <th>Début</th>
+                            <th>Source</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for match in matches %}
+                        <tr>
+                            <td><code>{{ match.unique_match_id[:8] }}...</code></td>
+                            <td>
+                                <strong>{{ match.equipe_domicile }}</strong><br>
+                                <small>vs {{ match.equipe_exterieur }}</small>
+                            </td>
+                            <td><span class="game-badge">{{ match.jeu }}</span></td>
+                            <td>
+                                {% if match.score_domicile is not none %}
+                                <strong>{{ match.score_domicile }} - {{ match.score_exterieur }}</strong>
+                                {% if match.equipe_gagnante %}
+                                <br><small>{{ match.equipe_gagnante }}</small>
+                                {% endif %}
+                                {% else %}
+                                <em>-</em>
+                                {% endif %}
+                            </td>
+                            <td><span class="status-badge status-{{ match.statut }}">{{ match.statut.replace('_', ' ') }}</span></td>
+                            <td>{{ match.heure_debut.strftime('%d/%m %H:%M') if match.heure_debut else 'N/A' }}</td>
+                            <td>{{ match.source_donnees or 'N/A' }}</td>
+                            <td>
+                                <div class="actions">
+                                    <button class="btn btn-sm btn-primary" onclick="viewMatch({{ match.id }})">👁️</button>
+                                    {% if match.statut == 'termine' %}
+                                    <button class="btn btn-sm btn-success" onclick="validateMatch({{ match.id }})">✅</button>
+                                    {% endif %}
+                                    <button class="btn btn-sm btn-warning" onclick="editMatch({{ match.id }})">✏️</button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteMatch({{ match.id }})">🗑️</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            {% if matches_pagination.pages > 1 %}
+            <div class="pagination">
+                {% if matches_pagination.has_prev %}
+                <a href="?page={{ matches_pagination.prev_num }}&jeu={{ jeu_filter }}&statut={{ statut_filter }}&source={{ source_filter }}">«</a>
+                {% endif %}
+                
+                {% for p in matches_pagination.iter_pages() %}
+                    {% if p %}
+                        {% if p == matches_pagination.page %}
+                        <span class="current">{{ p }}</span>
+                        {% else %}
+                        <a href="?page={{ p }}&jeu={{ jeu_filter }}&statut={{ statut_filter }}&source={{ source_filter }}">{{ p }}</a>
+                        {% endif %}
+                    {% else %}
+                    <span>...</span>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if matches_pagination.has_next %}
+                <a href="?page={{ matches_pagination.next_num }}&jeu={{ jeu_filter }}&statut={{ statut_filter }}&source={{ source_filter }}">»</a>
+                {% endif %}
+            </div>
+            {% endif %}
+            
+            <div class="logs-section">
+                <h3 style="margin-bottom: 20px; color: #333;">📊 Activité Récente du Système</h3>
+                {% for log in recent_logs %}
+                <div class="log-item">
+                    <div class="log-time">{{ log.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</div>
+                    <div class="log-message">{{ log.message }}</div>
+                    <span class="log-severity severity-{{ log.severity }}">{{ log.severity }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <script>
+            function viewMatch(id) {
+                // Implémenter la vue détaillée du match
+                alert('Vue détaillée du match ID: ' + id);
+            }
+            
+            function validateMatch(id) {
+                if (confirm('Valider ce match terminé ?')) {
+                    fetch('/admin/matchs-collectes/validate/' + id, {method: 'POST'})
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert('Erreur: ' + data.error);
+                        }
+                    });
+                }
+            }
+            
+            function editMatch(id) {
+                // Implémenter l'édition du match
+                alert('Édition du match ID: ' + id);
+            }
+            
+            function deleteMatch(id) {
+                if (confirm('Supprimer ce match ? Cette action est irréversible.')) {
+                    fetch('/admin/matchs-collectes/delete/' + id, {method: 'DELETE'})
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert('Erreur: ' + data.error);
+                        }
+                    });
+                }
+            }
+        </script>
+    </body>
+    </html>
+    '''
+    
+    return render_template_string(template, 
+        matches=matches,
+        matches_pagination=matches_pagination,
+        stats=stats,
+        recent_logs=recent_logs,
+        jeu_filter=jeu_filter,
+        statut_filter=statut_filter,
+        source_filter=source_filter
+    )
+
+
+@admin_bp.route('/matchs-collectes/validate/<int:match_id>', methods=['POST'])
+@require_admin
+def admin_validate_match(match_id):
+    """Valide un match terminé"""
+    
+    match = CollectedMatch.query.get_or_404(match_id)
+    admin_id = session.get('user_id')
+    
+    if match.statut != 'termine':
+        return jsonify({'error': 'Seuls les matchs terminés peuvent être validés'}), 400
+    
+    try:
+        # Marquer comme validé (pourrait ajouter un champ is_validated)
+        match.collecte_par = f"validated_by_admin_{admin_id}"
+        db.session.commit()
+        
+        log_action('admin_action', f"Match validé: {match.unique_match_id}", admin_id=admin_id)
+        
+        return jsonify({'success': True, 'message': 'Match validé avec succès'})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/matchs-collectes/delete/<int:match_id>', methods=['DELETE'])
+@require_admin
+def admin_delete_match(match_id):
+    """Supprime un match collecté"""
+    
+    match = CollectedMatch.query.get_or_404(match_id)
+    admin_id = session.get('user_id')
+    
+    try:
+        match_id_str = match.unique_match_id
+        db.session.delete(match)
+        db.session.commit()
+        
+        log_action('admin_action', f"Match supprimé: {match_id_str}", admin_id=admin_id, severity='warning')
+        
+        return jsonify({'success': True, 'message': 'Match supprimé avec succès'})
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/matchs-collectes/export')
+@require_admin
+def admin_export_matches():
+    """Exporte les matchs collectés en CSV"""
+    
+    import csv
+    from io import StringIO
+    from flask import Response
+    
+    matches = CollectedMatch.query.order_by(CollectedMatch.created_at.desc()).all()
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # En-tête CSV
+    writer.writerow([
+        'ID', 'Jeu', 'Equipe Domicile', 'Equipe Exterieur', 
+        'Score Domicile', 'Score Exterieur', 'Equipe Gagnante',
+        'Statut', 'Heure Debut', 'Heure Fin', 'Source',
+        'Date Creation'
+    ])
+    
+    # Données
+    for match in matches:
+        writer.writerow([
+            match.unique_match_id,
+            match.jeu,
+            match.equipe_domicile,
+            match.equipe_exterieur,
+            match.score_domicile or '',
+            match.score_exterieur or '',
+            match.equipe_gagnante or '',
+            match.statut,
+            match.heure_debut.isoformat() if match.heure_debut else '',
+            match.heure_fin.isoformat() if match.heure_fin else '',
+            match.source_donnees or '',
+            match.created_at.isoformat() if match.created_at else ''
+        ])
+    
+    output.seek(0)
+    
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=matchs_collectes_' + datetime.now().strftime('%Y%m%d_%H%M%S') + '.csv'}
+    )
+
+
+@admin_bp.route('/matchs-collectes/stats')
+@require_admin
+def admin_matchs_stats():
+    """API pour les statistiques détaillées des matchs collectés"""
+    
+    try:
+        # Importer le collecteur pour les stats
+        from match_collector import MatchCollector
+        collector = MatchCollector("simulated", 30)
+        stats = collector.get_statistics()
+        
+        return jsonify({'success': True, 'data': stats})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # Les fonctions sont maintenant définies au début du fichier

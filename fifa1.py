@@ -78,7 +78,7 @@ class NumpySimulation:
 from models import (
     db, User, SystemLog, Prediction, Alert, AccessLog,
     SubscriptionPlan, UserSubscription, UserPredictionAccess, Notification,
-    PersistentSession, BackupLog, PredictionSchedule
+    PersistentSession, BackupLog, PredictionSchedule, CollectedMatch, MatchCollectionLog
 )
 from prediction_manager import (
     log_action, log_access, create_prediction, get_prediction_by_match,
@@ -7183,6 +7183,357 @@ class AllianceSystemesPrediction:
                 return True
 
         return False
+
+
+# ========== ROUTES POUR LES MATCHS COLLECTÉS - SYSTÈME ORACXPRED ==========
+
+@app.route("/matchs-collectes")
+def matchs_collectes():
+    """Page publique des matchs collectés - Preuve de crédibilité du système"""
+    
+    # Récupérer les paramètres de filtrage et pagination
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    jeu_filter = request.args.get('jeu', 'all')
+    statut_filter = request.args.get('statut', 'all')
+    sort_by = request.args.get('sort', 'created_at_desc')
+    
+    # Construire la requête
+    query = CollectedMatch.query
+    
+    # Appliquer les filtres
+    if jeu_filter != 'all':
+        query = query.filter(CollectedMatch.jeu == jeu_filter)
+    
+    if statut_filter != 'all':
+        query = query.filter(CollectedMatch.statut == statut_filter)
+    
+    # Appliquer le tri
+    if sort_by == 'created_at_desc':
+        query = query.order_by(CollectedMatch.created_at.desc())
+    elif sort_by == 'created_at_asc':
+        query = query.order_by(CollectedMatch.created_at.asc())
+    elif sort_by == 'heure_debut_desc':
+        query = query.order_by(CollectedMatch.heure_debut.desc())
+    elif sort_by == 'heure_debut_asc':
+        query = query.order_by(CollectedMatch.heure_debut.asc())
+    elif sort_by == 'jeu':
+        query = query.order_by(CollectedMatch.jeu, CollectedMatch.created_at.desc())
+    elif sort_by == 'statut':
+        query = query.order_by(CollectedMatch.statut, CollectedMatch.created_at.desc())
+    
+    # Paginer
+    matches_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    matches = matches_pagination.items
+    
+    # Statistiques pour la page
+    stats = {
+        'total_matches': CollectedMatch.query.count(),
+        'en_attente': CollectedMatch.query.filter_by(statut='en_attente').count(),
+        'en_cours': CollectedMatch.query.filter_by(statut='en_cours').count(),
+        'termine': CollectedMatch.query.filter_by(statut='termine').count(),
+        'annule': CollectedMatch.query.filter_by(statut='annule').count(),
+        'fifa': CollectedMatch.query.filter_by(jeu='FIFA').count(),
+        'efootball': CollectedMatch.query.filter_by(jeu='eFootball').count(),
+        'fc': CollectedMatch.query.filter_by(jeu='FC').count(),
+        'last_24h': CollectedMatch.query.filter(
+            CollectedMatch.created_at >= datetime.datetime.now() - datetime.timedelta(hours=24)
+        ).count()
+    }
+    
+    # Activité récente (logs)
+    recent_logs = MatchCollectionLog.query.order_by(MatchCollectionLog.created_at.desc()).limit(5).all()
+    
+    template = '''
+    <!DOCTYPE html>
+    <html lang="fr">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Matchs Collectés - ORACXPRED</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; }
+            .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+            .header { text-align: center; color: white; margin-bottom: 30px; }
+            .header h1 { font-size: 2.5em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
+            .header p { font-size: 1.2em; opacity: 0.9; }
+            .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 30px; }
+            .stat-card { background: rgba(255,255,255,0.95); padding: 20px; border-radius: 15px; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.1); backdrop-filter: blur(10px); }
+            .stat-number { font-size: 2em; font-weight: bold; color: #667eea; margin-bottom: 5px; }
+            .stat-label { color: #666; font-size: 0.9em; }
+            .filters { background: rgba(255,255,255,0.95); padding: 20px; border-radius: 15px; margin-bottom: 30px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); }
+            .filter-row { display: flex; gap: 15px; flex-wrap: wrap; align-items: center; margin-bottom: 15px; }
+            .filter-group { display: flex; flex-direction: column; min-width: 150px; }
+            .filter-group label { font-weight: bold; margin-bottom: 5px; color: #333; }
+            .filter-group select, .filter-group select { padding: 8px 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 14px; }
+            .matches-grid { display: grid; gap: 20px; margin-bottom: 30px; }
+            .match-card { background: rgba(255,255,255,0.95); padding: 25px; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); backdrop-filter: blur(10px); transition: transform 0.3s ease, box-shadow 0.3s ease; }
+            .match-card:hover { transform: translateY(-5px); box-shadow: 0 12px 40px rgba(0,0,0,0.15); }
+            .match-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+            .match-teams { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+            .team { text-align: center; flex: 1; }
+            .team-name { font-weight: bold; font-size: 1.1em; color: #333; }
+            .vs { color: #666; font-weight: bold; margin: 0 15px; }
+            .score { font-size: 1.5em; font-weight: bold; color: #667eea; }
+            .match-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-top: 15px; }
+            .info-item { text-align: center; }
+            .info-label { font-size: 0.8em; color: #666; margin-bottom: 2px; }
+            .info-value { font-weight: bold; color: #333; }
+            .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.8em; font-weight: bold; text-transform: uppercase; }
+            .status-en_attente { background: #fff3cd; color: #856404; }
+            .status-en_cours { background: #cce5ff; color: #004085; }
+            .status-termine { background: #d4edda; color: #155724; }
+            .status-annule { background: #f8d7da; color: #721c24; }
+            .game-badge { padding: 4px 12px; border-radius: 15px; font-size: 0.8em; font-weight: bold; background: #667eea; color: white; }
+            .pagination { display: flex; justify-content: center; gap: 10px; margin-top: 30px; }
+            .pagination a { padding: 10px 15px; background: rgba(255,255,255,0.95); color: #667eea; text-decoration: none; border-radius: 8px; transition: all 0.3s ease; }
+            .pagination a:hover { background: #667eea; color: white; }
+            .pagination .current { background: #667eea; color: white; }
+            .activity-log { background: rgba(255,255,255,0.95); padding: 20px; border-radius: 15px; margin-top: 30px; }
+            .log-item { padding: 10px; border-left: 4px solid #667eea; margin-bottom: 10px; background: rgba(102,126,234,0.1); }
+            .log-time { font-size: 0.8em; color: #666; }
+            .log-message { color: #333; margin-top: 2px; }
+            .footer { text-align: center; color: white; margin-top: 40px; opacity: 0.8; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>🎮 Matchs Collectés ORACXPRED</h1>
+                <p>Base de données vivante - Preuve de crédibilité de notre IA prédictive</p>
+            </div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.total_matches }}</div>
+                    <div class="stat-label">Total Matchs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.en_cours }}</div>
+                    <div class="stat-label">En Cours</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.termine }}</div>
+                    <div class="stat-label">Terminés</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.last_24h }}</div>
+                    <div class="stat-label">Dernières 24h</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.fifa }}</div>
+                    <div class="stat-label">FIFA</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{{ stats.efootball }}</div>
+                    <div class="stat-label">eFootball</div>
+                </div>
+            </div>
+            
+            <div class="filters">
+                <form method="GET">
+                    <div class="filter-row">
+                        <div class="filter-group">
+                            <label>Jeu</label>
+                            <select name="jeu">
+                                <option value="all" {% if jeu_filter == 'all' %}selected{% endif %}>Tous les jeux</option>
+                                <option value="FIFA" {% if jeu_filter == 'FIFA' %}selected{% endif %}>FIFA</option>
+                                <option value="eFootball" {% if jeu_filter == 'eFootball' %}selected{% endif %}>eFootball</option>
+                                <option value="FC" {% if jeu_filter == 'FC' %}selected{% endif %}>FC</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Statut</label>
+                            <select name="statut">
+                                <option value="all" {% if statut_filter == 'all' %}selected{% endif %}>Tous les statuts</option>
+                                <option value="en_attente" {% if statut_filter == 'en_attente' %}selected{% endif %}>En attente</option>
+                                <option value="en_cours" {% if statut_filter == 'en_cours' %}selected{% endif %}>En cours</option>
+                                <option value="termine" {% if statut_filter == 'termine' %}selected{% endif %}>Terminé</option>
+                                <option value="annule" {% if statut_filter == 'annule' %}selected{% endif %}>Annulé</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Trier par</label>
+                            <select name="sort">
+                                <option value="created_at_desc" {% if sort_by == 'created_at_desc' %}selected{% endif %}>Plus récents</option>
+                                <option value="created_at_asc" {% if sort_by == 'created_at_asc' %}selected{% endif %}>Plus anciens</option>
+                                <option value="heure_debut_desc" {% if sort_by == 'heure_debut_desc' %}selected{% endif %}>Début plus récent</option>
+                                <option value="heure_debut_asc" {% if sort_by == 'heure_debut_asc' %}selected{% endif %}>Début plus ancien</option>
+                                <option value="jeu" {% if sort_by == 'jeu' %}selected{% endif %}>Jeu</option>
+                                <option value="statut" {% if sort_by == 'statut' %}selected{% endif %}>Statut</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>&nbsp;</label>
+                            <button type="submit" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold;">Appliquer</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div class="matches-grid">
+                {% for match in matches %}
+                <div class="match-card">
+                    <div class="match-header">
+                        <span class="game-badge">{{ match.jeu }}</span>
+                        <span class="status-badge status-{{ match.statut }}">{{ match.statut.replace('_', ' ') }}</span>
+                    </div>
+                    
+                    <div class="match-teams">
+                        <div class="team">
+                            <div class="team-name">{{ match.equipe_domicile }}</div>
+                        </div>
+                        <div class="vs">VS</div>
+                        <div class="team">
+                            <div class="team-name">{{ match.equipe_exterieur }}</div>
+                        </div>
+                    </div>
+                    
+                    {% if match.score_domicile is not none %}
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <span class="score">{{ match.score_domicile }} - {{ match.score_exterieur }}</span>
+                        {% if match.equipe_gagnante %}
+                        <div style="margin-top: 5px; color: #155724; font-weight: bold;">🏆 {{ match.equipe_gagnante }}</div>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    
+                    <div class="match-info">
+                        <div class="info-item">
+                            <div class="info-label">Début</div>
+                            <div class="info-value">{{ match.heure_debut.strftime('%d/%m %H:%M') if match.heure_debut else 'N/A' }}</div>
+                        </div>
+                        {% if match.heure_fin %}
+                        <div class="info-item">
+                            <div class="info-label">Fin</div>
+                            <div class="info-value">{{ match.heure_fin.strftime('%d/%m %H:%M') }}</div>
+                        </div>
+                        {% endif %}
+                        <div class="info-item">
+                            <div class="info-label">Source</div>
+                            <div class="info-value">{{ match.source_donnees or 'N/A' }}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">ID</div>
+                            <div class="info-value" style="font-size: 0.8em;">{{ match.unique_match_id[:8] }}...</div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            
+            {% if matches_pagination.pages > 1 %}
+            <div class="pagination">
+                {% if matches_pagination.has_prev %}
+                <a href="?page={{ matches_pagination.prev_num }}&jeu={{ jeu_filter }}&statut={{ statut_filter }}&sort={{ sort_by }}">«</a>
+                {% endif %}
+                
+                {% for p in matches_pagination.iter_pages() %}
+                    {% if p %}
+                        {% if p == matches_pagination.page %}
+                        <span class="current">{{ p }}</span>
+                        {% else %}
+                        <a href="?page={{ p }}&jeu={{ jeu_filter }}&statut={{ statut_filter }}&sort={{ sort_by }}">{{ p }}</a>
+                        {% endif %}
+                    {% else %}
+                    <span>...</span>
+                    {% endif %}
+                {% endfor %}
+                
+                {% if matches_pagination.has_next %}
+                <a href="?page={{ matches_pagination.next_num }}&jeu={{ jeu_filter }}&statut={{ statut_filter }}&sort={{ sort_by }}">»</a>
+                {% endif %}
+            </div>
+            {% endif %}
+            
+            {% if recent_logs %}
+            <div class="activity-log">
+                <h3 style="margin-bottom: 15px; color: #333;">📊 Activité Récente du Système</h3>
+                {% for log in recent_logs %}
+                <div class="log-item">
+                    <div class="log-time">{{ log.created_at.strftime('%d/%m %H:%M:%S') }}</div>
+                    <div class="log-message">{{ log.message }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            
+            <div class="footer">
+                <p>🤖 ORACXPRED - Système de collecte automatique • Données en temps réel</p>
+                <p style="font-size: 0.9em; margin-top: 5px;">Powered by Advanced AI Technology</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
+    
+    return render_template_string(template, 
+        matches=matches, 
+        matches_pagination=matches_pagination,
+        stats=stats, 
+        recent_logs=recent_logs,
+        jeu_filter=jeu_filter,
+        statut_filter=statut_filter,
+        sort_by=sort_by
+    )
+
+
+@app.route("/api/matchs-collectes")
+def api_matchs_collectes():
+    """API JSON pour les matchs collectés"""
+    
+    # Paramètres
+    limit = request.args.get('limit', 50, type=int)
+    jeu_filter = request.args.get('jeu')
+    statut_filter = request.args.get('statut')
+    
+    # Construire la requête
+    query = CollectedMatch.query
+    
+    if jeu_filter:
+        query = query.filter(CollectedMatch.jeu == jeu_filter)
+    
+    if statut_filter:
+        query = query.filter(CollectedMatch.statut == statut_filter)
+    
+    # Limiter et ordonner
+    matches = query.order_by(CollectedMatch.created_at.desc()).limit(limit).all()
+    
+    # Retourner en JSON
+    return {
+        'success': True,
+        'data': [match.to_dict() for match in matches],
+        'count': len(matches),
+        'filters': {
+            'jeu': jeu_filter,
+            'statut': statut_filter,
+            'limit': limit
+        }
+    }
+
+
+@app.route("/api/collecte-stats")
+def api_collecte_stats():
+    """API pour les statistiques de collecte"""
+    
+    try:
+        # Importer le collecteur si disponible
+        from match_collector import MatchCollector
+        collector = MatchCollector("simulated", 30)
+        stats = collector.get_statistics()
+        
+        return {
+            'success': True,
+            'data': stats
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
 
 if __name__ == "__main__":
     # Configuration pour Render
